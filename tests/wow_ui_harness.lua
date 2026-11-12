@@ -13,10 +13,15 @@ function Frame:SetAllPoints() self.allPoints = true end
 function Frame:SetSize(width, height) self.width, self.height = width, height end
 function Frame:SetFrameLevel(level) self.frameLevel = level end
 function Frame:GetFrameLevel() return self.frameLevel end
+function Frame:GetName() return self.name end
+function Frame:GetWidth() return self.width end
+function Frame:GetHeight() return self.height end
+function Frame:GetEffectiveScale() return 1 end
+function Frame:GetFrameStrata() return "MEDIUM" end
 function Frame:EnableMouseWheel(enabled) self.mouseWheel = enabled end
 function Frame:CreateTexture() return Frame:new(nil, self) end
 function Frame:CreateFontString() return Frame:new(nil, self) end
-function Frame:SetTexture(texture) self.texture = texture end
+function Frame:SetTexture(...) self.texture = {...} end
 function Frame:GetNormalTexture() return self.normalTexture end
 function Frame:SetTexCoord(...) self.texCoord = {...} end
 function Frame:SetBlendMode(mode) self.blendMode = mode end
@@ -37,6 +42,7 @@ function Frame:Show()
 end
 function Frame:Hide() self.shown = false end
 function Frame:IsShown() return self.shown end
+function Frame:IsVisible() return self.shown and (not self.parent or self.parent:IsVisible()) end
 function Frame:Enable() self.enabled = true end
 function Frame:Disable() self.enabled = false end
 function Frame:SetChecked(value) self.checked = value end
@@ -62,29 +68,49 @@ end
 
 BankFrame = Frame:new("BankFrame")
 BankFrame.frameLevel = 4
+BankFrame:SetSize(425, 512)
 BankFrame:Hide()
+BankPortraitTexture = Frame:new("BankPortraitTexture", BankFrame)
+BankPortraitTexture.objectType = "Texture"
+local stockArtwork = Frame:new(nil, BankFrame)
+stockArtwork.objectType = "Texture"
+stockArtwork:SetTexture("Interface\\BankFrame\\UI-BankFrame")
 BankFrameTitleText = Frame:new("BankFrameTitleText", BankFrame)
 BankFrameTitleText.objectType = "FontString"
 local itemLabel, bagLabel = Frame:new(nil, BankFrame), Frame:new(nil, BankFrame)
 itemLabel.objectType, bagLabel.objectType = "FontString", "FontString"
-BankFrame.regions = {BankFrameTitleText, itemLabel, bagLabel}
+ITEMSLOTTEXT, BAGSLOTTEXT = "Item Slots", "Bag Slots"
+itemLabel:SetText(ITEMSLOTTEXT); bagLabel:SetText(BAGSLOTTEXT)
+BankFrame.regions = {BankPortraitTexture, stockArtwork, BankFrameTitleText, itemLabel, bagLabel}
+BankCloseButton = Frame:new("BankCloseButton", BankFrame)
 NUM_BANKGENERIC_SLOTS, NUM_BANKBAGSLOTS = 28, 7
-for index = 1, NUM_BANKGENERIC_SLOTS do Frame:new("BankFrameItem" .. index, BankFrame) end
-for index = 1, NUM_BANKBAGSLOTS do Frame:new("BankFrameBag" .. index, BankFrame) end
+local stockButtonRegions = {}
+for index = 1, NUM_BANKGENERIC_SLOTS do
+    local button = Frame:new("BankFrameItem" .. index, BankFrame)
+    local normal, icon = Frame:new(nil, button), Frame:new(nil, button)
+    normal.objectType, icon.objectType = "Texture", "Texture"
+    button.regions = {normal, icon}; stockButtonRegions[#stockButtonRegions + 1] = normal
+end
+for index = 1, NUM_BANKBAGSLOTS do
+    local button = Frame:new("BankFrameBag" .. index, BankFrame)
+    local normal, icon = Frame:new(nil, button), Frame:new(nil, button)
+    normal.objectType, icon.objectType = "Texture", "Texture"
+    button.regions = {normal, icon}; stockButtonRegions[#stockButtonRegions + 1] = normal
+end
 BankFrameMoneyFrame = Frame:new("BankFrameMoneyFrame", BankFrame)
 BankFramePurchaseInfo = Frame:new("BankFramePurchaseInfo", BankFrame)
 BankFramePurchaseButton = Frame:new("BankFramePurchaseButton", BankFramePurchaseInfo)
 BankFrameDetailMoneyFrame = Frame:new("BankFrameDetailMoneyFrame", BankFramePurchaseInfo)
 
-function BankFrameItemButton_Update(button) button:Show() end
+function BankFrameItemButton_Update(button) button.updated = (button.updated or 0) + 1 end
 function UpdateBagSlotStatus() BankFramePurchaseInfo:Show() end
 function BankFrame_OnShow()
-    for index = 1, NUM_BANKGENERIC_SLOTS do _G["BankFrameItem" .. index]:Show() end
-    for index = 1, NUM_BANKBAGSLOTS do _G["BankFrameBag" .. index]:Show() end
+    for index = 1, NUM_BANKGENERIC_SLOTS do BankFrameItemButton_Update(_G["BankFrameItem" .. index]) end
+    for index = 1, NUM_BANKBAGSLOTS do BankFrameItemButton_Update(_G["BankFrameBag" .. index]) end
     UpdateBagSlotStatus()
 end
 function BankFrame_OnEvent(_, event)
-    if event == "PLAYERBANKSLOTS_CHANGED" then BankFrameItem1:Show() end
+    if event == "PLAYERBANKSLOTS_CHANGED" then BankFrameItemButton_Update(BankFrameItem1) end
 end
 function hooksecurefunc(name, callback)
     local original = _G[name]
@@ -133,23 +159,33 @@ end
 assert(lifecycle and lifecycle.scripts.OnEvent, "bank lifecycle frame was not initialized")
 lifecycle.scripts.OnEvent(lifecycle, "PLAYER_LOGIN")
 
-for slot = 1, 42 do assert(_G["NativeReagentsItem" .. slot], "missing reagent item button " .. slot) end
-assert(NativeReagentsBankTab.points[1][1] == "TOPLEFT", "Bank tab is not attached below BankFrame")
-assert(NativeReagentsBankTab.points[1][2] == BankFrame, "Bank tab lost its BankFrame anchor")
-assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached to the bottom border")
-assert(NativeReagentsBankTab.points[1][5] == 70, "Bank tab is not attached to BankFrame's visible bottom border")
-for slot = 1, 42 do
+for slot = 1, 35 do assert(_G["NativeReagentsItem" .. slot], "missing reagent item button " .. slot) end
+assert(not _G.NativeReagentsItem36, "sixth reagent row was unexpectedly created")
+assert(NativeReagentsTabAnchor.points[1][1] == "BOTTOMLEFT", "tab anchor lost its BankFrame edge")
+assert(NativeReagentsTabAnchor.points[1][2] == BankFrame, "tab anchor lost BankFrame parent geometry")
+assert(NativeReagentsTabAnchor.points[1][3] == "BOTTOMLEFT", "tab anchor is not based on BankFrame bottom")
+assert(NativeReagentsTabAnchor.points[1][5] == 88, "tab anchor does not use the texture alpha boundary")
+assert(NativeReagentsBankTab.points[1][2] == NativeReagentsTabAnchor, "Bank tab is not attached to the visible-border anchor")
+assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached beneath the visible border")
+for slot = 1, 35 do
     local button = _G["NativeReagentsItem" .. slot]
     assert(button.width == 37 and button.height == 37, "reagent slot dimensions changed")
-    assert(button.normalTexture.texture == "Interface\\Buttons\\UI-Quickslot2", "reagent slot lost stock artwork")
+    assert(button.normalTexture.texture[1] == "Interface\\Buttons\\UI-Quickslot2", "reagent slot lost stock artwork")
 end
 assert(NativeReagentsItem2.points[1][4] - NativeReagentsItem1.points[1][4] == 49, "horizontal slot pitch is not stock geometry")
 assert(NativeReagentsItem8.points[1][5] - NativeReagentsItem1.points[1][5] == -44, "vertical slot pitch is not stock geometry")
 assert(NativeReagentsPrevious.points[1][5] > NativeReagentsDepositButton.points[1][5], "pagination overlaps deposit controls")
 assert(NativeReagentsDepositButton.parent == NativeReagentsBankFrame.controls, "deposit button is outside bottom controls")
 assert(NativeReagentsAutoDeposit.parent == NativeReagentsBankFrame.controls, "auto-deposit is outside bottom controls")
-assert(NativeReagentsBankFrame.controls.points[1][5] == 4, "bottom controls were not moved inside the reagent page")
+assert(NativeReagentsBankFrame.controls.points[1][5] == 8, "bottom controls are not inset from the visible border")
+assert(NativeReagentsBankFrame.points[1][5] == -68 and NativeReagentsBankFrame.points[2][5] == 92,
+    "reagent page is not bounded by the stock artwork interior")
+assert(NativeReagentsBankFrame.contentMask.texture[1] == 0.035 and NativeReagentsBankFrame.contentMask.texture[4] == 1,
+    "stock artwork mask is not an opaque solid texture")
+assert(#NativeReagentsBankFrame.contentMask.points == 2,
+    "content mask does not cover the complete reagent page")
 
+BankFrame:Show()
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_OPENED")
 assert(NativeReagentsBankTab.shown and NativeReagentsReagentTab.shown, "tabs are hidden at an open bank")
 assert(NativeReagentsBankTab.selected and not NativeReagentsBankFrame.shown, "Bank must be the default page")
@@ -158,26 +194,27 @@ NativeReagentsReagentTab.scripts.OnClick()
 assert(NativeReagentsBankFrame.shown and NativeReagentsReagentTab.selected, "Reagents page was not selected")
 for index = 1, 28 do assert(not _G["BankFrameItem" .. index].shown, "stock bank slot leaked through") end
 for index = 1, 7 do assert(not _G["BankFrameBag" .. index].shown, "stock bank bag leaked through") end
+for _, region in ipairs(stockButtonRegions) do assert(not region:IsVisible(), "inherited stock button artwork leaked through") end
 assert(not itemLabel.shown and not bagLabel.shown and BankFrameTitleText.shown, "stock labels or banker title visibility is wrong")
+assert(stockArtwork:IsVisible(), "shared monolithic BankFrame artwork was hidden")
+assert(BankPortraitTexture:IsVisible() and BankCloseButton:IsVisible(), "shared BankFrame controls were hidden")
 assert(NativeReagentsBankFrame.statusText.text == "No reagents stored", "empty state was not rendered")
 
 BankFrameItemButton_Update(BankFrameItem1)
 UpdateBagSlotStatus()
 BankFrame_OnShow()
 BankFrame_OnEvent(BankFrame, "PLAYERBANKSLOTS_CHANGED")
-itemLabel:Show(); bagLabel:Show()
-lifecycle.scripts.OnEvent(lifecycle, "BAG_UPDATE")
 for index = 1, 28 do assert(not _G["BankFrameItem" .. index].shown, "stock bank refresh restored item slot " .. index) end
 for index = 1, 7 do assert(not _G["BankFrameBag" .. index].shown, "stock bank refresh restored bag slot " .. index) end
 assert(not BankFramePurchaseInfo.shown and not BankFrameMoneyFrame.shown, "stock bank controls escaped reagent page")
 assert(not itemLabel.shown and not bagLabel.shown, "stock bank labels escaped reagent page")
 
-for id = 1, 43 do NativeReagents.items[id] = id * 100 end
+for id = 1, 36 do NativeReagents.items[id] = id * 100 end
 Fire("ITEMS_UPDATED")
 assert(NativeReagentsBankFrame.pageText.text == "Page 1 of 2", "multi-page count is wrong")
 NativeReagentsNext.scripts.OnClick()
 assert(NativeReagentsBankFrame.pageText.text == "Page 2 of 2", "next-page navigation failed")
-assert(NativeReagentsItem1.itemId == 43 and NativeReagentsItem1.itemCount == 4300, "second page did not render")
+assert(NativeReagentsItem1.itemId == 36 and NativeReagentsItem1.itemCount == 3600, "second page did not render")
 
 NativeReagentsBankTab.scripts.OnClick()
 assert(not NativeReagentsBankFrame.shown and NativeReagentsBankTab.selected, "Bank page was not restored")

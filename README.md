@@ -13,7 +13,7 @@ original projects remain usable on their own and are not dependencies of this mo
 - Character-specific reagent storage using the established
   `character_bank_reagents` and `character_bank_reagent_settings` tables.
 - Bank remains the default and is Blizzard's unmodified BankFrame content. A full-page,
-  stock-styled Reagents view supplies a 7-by-6 icon grid,
+  stock-styled Reagents view supplies a 7-by-5 icon grid,
   quantities, item tooltips, quality borders, paging, right-click stack withdrawal,
   and shift-click quantity entry.
 - Manual **Deposit Reagents** and persistent **Auto Deposit** controls.
@@ -49,16 +49,22 @@ Opening a banker always selects **Bank**. That page is the original Blizzard Ban
 28 bank slots, seven bank-bag slots, purchased bags, purchase controls, money display,
 portrait, title, close button, artwork, size, and behavior remain owned by stock FrameXML.
 Blizzard-style **Bank** and **Reagents** tabs are anchored to BankFrame below its visible bottom
-border, so they follow the frame at every UI scale.
+border. The anchor is derived from the 512-by-512 `UI-BankFrame` texture's alpha boundary, so
+it follows the frame at every UI scale instead of using the lower hit-rect boundary.
 
 **Reagents** is a separate BankFrame child page, not an overlay of usable bank slots. While it
 is selected, the module records and hides only the stock inventory, bank-bag, purchase, and
-money controls. Conditional visibility guards keep those controls hidden if stock BankFrame
-updates run while the page is selected. The independent page displays 42 reagent slots,
+money controls. The stock frame's slot outlines and bag bars are part of the same monolithic
+texture as its shared outer border, so an opaque reagent content surface covers only that
+interior. A single post-update guard handles the one Blizzard function that can re-show the
+purchase frame. The independent page displays 35 reagent slots,
 quality borders, quantities, tooltips, an empty state, mouse-wheel/button pagination,
 **Auto Deposit**, and **Deposit Reagents**. Returning to Bank disables the guards and restores
 each stock control to its prior visibility state. Closing and reopening the bank always resets
 the page to Bank.
+
+The exact stock hierarchy, source provenance, geometry, and opt-in runtime diagnostic commands
+are documented in [`docs/BANKFRAME_HIERARCHY.md`](docs/BANKFRAME_HIERARCHY.md).
 
 ## Installation
 
@@ -189,7 +195,7 @@ available AzerothCore headers are supported. The module also compiled into Azero
 and Portalkeeper delivery require the live plan and must not be inferred from build/static
 checks alone.
 
-Known limitations: the precise tab offsets, content crop, tooltip behavior, bank-bag purchase
+Known limitations: the rendered tab attachment, content mask, tooltip behavior, bank-bag purchase
 popups, and controls at non-default UI scales still require the patched 3.3.5a client matrix.
 Automated tests model the FrameXML lifecycle but do not render Blizzard textures. Remote
 crafting remains outside this corrective pass and disabled by default.

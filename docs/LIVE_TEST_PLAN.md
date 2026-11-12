@@ -7,6 +7,11 @@ and [`../design/Reagent Tab mockup.png`](../design/Reagent%20Tab%20mockup.png).
 
 ## Rebuild and deploy to PTR
 
+This corrective change is client-only. On a PTR that already has the tested server module and
+schema, do not rebuild or restart worldserver and do not apply SQL; rebuild and redeploy only
+the EPF/cumulative client patch (steps 4-6). Steps 1-3 apply only to a fresh full-module
+deployment or an intentional server revision update.
+
 1. In the AzerothCore checkout, update `modules/mod-native-reagents` to this working tree and
    keep `NativeReagents.RemoteCraft.Enable = 0`. Set `NativeReagents.Debug = 1` for the first
    authorization pass only.
@@ -57,8 +62,8 @@ and [`../design/Reagent Tab mockup.png`](../design/Reagent%20Tab%20mockup.png).
   repeat a captured request ID and confirm only one mutation in the server session.
 - Toggle Auto Deposit, relog/restart, and confirm preference persistence and manual deposit
   availability while disabled.
-- With empty storage, confirm `No reagents stored` and 42 initialized empty slots. With 1, 42,
-  43, and 85 distinct entries, verify `Page X of Y`, disabled bounds, Previous/Next, mouse-wheel
+- With empty storage, confirm `No reagents stored` and 35 initialized empty slots. With 1, 35,
+  36, and 71 distinct entries, verify `Page X of Y`, disabled bounds, Previous/Next, mouse-wheel
   navigation, icons, quality borders, quantities above normal stack size, and tooltips.
 - Right-click an entry to withdraw one normal stack; shift-click it to withdraw a chosen amount.
   Confirm successful deposit/withdraw refreshes and full-bag/invalid-quantity failures do not
@@ -83,3 +88,15 @@ Record screenshots for both pages, the exact cumulative content generation, Port
 package version, worldserver revision, UI scale, `/console scriptErrors 1` output, debug
 authorization lines, database balances before/after, and every failed scenario. A clean live
 pass is still required before calling the visual design or banker sequence PTR-verified.
+
+If any stock artwork or geometry defect remains, enable the opt-in diagnostics, switch pages,
+and capture the resulting chat lines with the screenshot:
+
+```text
+/run NativeReagents.SetBankFrameDiagnostics(true)
+/run NativeReagents.DumpBankFrame()
+```
+
+Disable assertions after capture with
+`/run NativeReagents.SetBankFrameDiagnostics(false)`. The hierarchy and expected stock objects
+are described in [`BANKFRAME_HIERARCHY.md`](BANKFRAME_HIERARCHY.md).

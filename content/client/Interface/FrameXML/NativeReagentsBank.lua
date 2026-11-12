@@ -1,35 +1,42 @@
 local NR = NativeReagents
 local view, buttons, page = nil, {}, 0
-local columns, perPage = 7, 42
+local columns, rows, perPage = 7, 5, 35
 -- Stock BankFrame item buttons are 37x37, with 12 horizontal and 7 vertical
 -- gaps.  Keeping the native pitch is important because ItemButtonTemplate's
 -- 64x64 UI-Quickslot2 normal texture extends outside the button itself.
 local slotWidth, slotHeight, columnPitch, rowPitch = 37, 37, 49, 44
-local stockFrames, stockLabels, stockState = {}, {}, nil
+-- Build 12340 BankFrame.xml declares a 425x512 frame and a 512x512
+-- UI-BankFrame texture.  The texture's non-transparent alpha bounds end at
+-- row 423, so its visible bottom is 88 UI units above the logical frame bottom.
+-- HitRectInsets bottom=70 is interaction geometry, not the artwork boundary.
+local artworkBottomInset = 88
+local stockObjects, stockLabels, stockState = {}, {}, nil
 local reagentsSelected = false
+local visibilityHookInstalled = false
 
 local quality = {
     [0] = {0.62, 0.62, 0.62}, [1] = {1, 1, 1}, [2] = {0.12, 1, 0},
     [3] = {0, 0.44, 0.87}, [4] = {0.64, 0.21, 0.93}, [5] = {1, 0.5, 0}
 }
 
-local function FindStockFrames()
-    local function Add(frame) if frame then table.insert(stockFrames, frame) end end
+local function FindStockObjects()
+    local function Add(frame) if frame then table.insert(stockObjects, frame) end end
     for i = 1, (NUM_BANKGENERIC_SLOTS or 28) do Add(_G["BankFrameItem" .. i]) end
     for i = 1, (NUM_BANKBAGSLOTS or 7) do Add(_G["BankFrameBag" .. i]) end
-    -- PurchaseButton and DetailMoneyFrame are descendants of PurchaseInfo in
-    -- Blizzard's BankFrame.xml, but include them explicitly so a direct Show()
-    -- cannot escape the selected page if custom FrameXML has reparented them.
+    -- PurchaseButton and DetailMoneyFrame are descendants of PurchaseInfo.
+    -- Hiding PurchaseInfo hides both; recording the descendants makes the
+    -- diagnostic inventory complete and restoration resilient to a direct Hide.
     Add(BankFramePurchaseInfo)
     Add(BankFramePurchaseButton)
     Add(BankFrameDetailMoneyFrame)
     Add(BankFrameMoneyFrame)
 
-    -- The stock "Item Slots" and "Bag Slots" labels are anonymous regions on
-    -- BankFrame.  BankFrameTitleText is named and must remain visible.
+    -- These two stock labels are anonymous BankFrame FontStrings.  Match their
+    -- localized text instead of hiding every anonymous FontString on BankFrame.
     local regions = {BankFrame:GetRegions()}
     for _, region in ipairs(regions) do
-        if region ~= BankFrameTitleText and region:GetObjectType() == "FontString" then
+        local text = region:GetObjectType() == "FontString" and region:GetText()
+        if text == ITEMSLOTTEXT or text == BAGSLOTTEXT then
             table.insert(stockLabels, region)
         end
     end
@@ -37,30 +44,27 @@ end
 
 local function EnforceStockHidden()
     if not reagentsSelected then return end
-    for _, frame in ipairs(stockFrames) do frame:Hide() end
+    for _, frame in ipairs(stockObjects) do frame:Hide() end
     for _, region in ipairs(stockLabels) do region:Hide() end
 end
 
 local function HideStock()
     if not stockState then
         stockState = {}
-        for _, frame in ipairs(stockFrames) do stockState[frame] = frame:IsShown() and true or false end
+        for _, frame in ipairs(stockObjects) do stockState[frame] = frame:IsShown() and true or false end
         for _, region in ipairs(stockLabels) do stockState[region] = region:IsShown() and true or false end
     end
     EnforceStockHidden()
 end
 
-local function InstallStockVisibilityGuards()
-    for _, frame in ipairs(stockFrames) do
-        frame:HookScript("OnShow", function(self)
-            if reagentsSelected then self:Hide() end
-        end)
-    end
-    local function EnforceAfterStockUpdate() EnforceStockHidden() end
-    if BankFrameItemButton_Update then hooksecurefunc("BankFrameItemButton_Update", EnforceAfterStockUpdate) end
-    if UpdateBagSlotStatus then hooksecurefunc("UpdateBagSlotStatus", EnforceAfterStockUpdate) end
-    if BankFrame_OnShow then hooksecurefunc("BankFrame_OnShow", EnforceAfterStockUpdate) end
-    if BankFrame_OnEvent then hooksecurefunc("BankFrame_OnEvent", EnforceAfterStockUpdate) end
+local function InstallStockVisibilityGuard()
+    if visibilityHookInstalled then return end
+    visibilityHookInstalled = true
+    -- In stock 3.3.5a, item/bag refreshes update textures but never Show the
+    -- buttons.  UpdateBagSlotStatus is the one stock update that explicitly
+    -- Shows BankFramePurchaseInfo, so it is the only function that needs a
+    -- post-update guard while Reagents is selected.
+    if UpdateBagSlotStatus then hooksecurefunc("UpdateBagSlotStatus", EnforceStockHidden) end
 end
 
 local function RestoreStock()
@@ -70,6 +74,13 @@ local function RestoreStock()
         if shown then frame:Show() else frame:Hide() end
     end
     stockState = nil
+    -- Let Blizzard recompute textures, locks, cooldowns, money, and purchase
+    -- availability after the saved visibility state has been restored.
+    if BankFrameItemButton_Update then
+        for i = 1, (NUM_BANKGENERIC_SLOTS or 28) do BankFrameItemButton_Update(_G["BankFrameItem" .. i]) end
+        for i = 1, (NUM_BANKBAGSLOTS or 7) do BankFrameItemButton_Update(_G["BankFrameBag" .. i]) end
+    end
+    if UpdateBagSlotStatus then UpdateBagSlotStatus() end
 end
 
 local function HideStockForPage()
@@ -77,10 +88,76 @@ local function HideStockForPage()
     HideStock()
 end
 
-local function RefreshStockVisibility()
-    if reagentsSelected then
-        EnforceStockHidden()
+local function ObjectName(object)
+    local name = object and object.GetName and object:GetName()
+    return name or "<anonymous>"
+end
+
+local function DiagnosticLine(message)
+    if DEFAULT_CHAT_FRAME then DEFAULT_CHAT_FRAME:AddMessage("|cff4fc3f7NR frame:|r " .. message) end
+end
+
+local function DescribeObject(label, object)
+    if not object then DiagnosticLine(label .. " = <missing>"); return end
+    local parent = object.GetParent and object:GetParent()
+    local parts = {
+        label .. "=" .. ObjectName(object),
+        "type=" .. tostring(object:GetObjectType()),
+        "shown=" .. tostring(object:IsShown()),
+        "parent=" .. ObjectName(parent)
+    }
+    if object.GetFrameStrata then table.insert(parts, "strata=" .. tostring(object:GetFrameStrata())) end
+    if object.GetFrameLevel then table.insert(parts, "level=" .. tostring(object:GetFrameLevel())) end
+    if object.GetEffectiveScale then table.insert(parts, "scale=" .. tostring(object:GetEffectiveScale())) end
+    if object.GetNumPoints and object.GetPoint then
+        for i = 1, object:GetNumPoints() do
+            local point, relative, relativePoint, x, y = object:GetPoint(i)
+            table.insert(parts, "point" .. i .. "=" .. tostring(point) .. ":" .. ObjectName(relative) .. ":" .. tostring(relativePoint) .. ":" .. tostring(x) .. ":" .. tostring(y))
+        end
     end
+    DiagnosticLine(table.concat(parts, " "))
+end
+
+-- Development-only and silent until explicitly called from /run.
+function NR.SetBankFrameDiagnostics(enabled) NR.bankFrameDiagnostics = enabled and true or false end
+function NR.DumpBankFrame()
+    if not BankFrame then DiagnosticLine("BankFrame is not loaded"); return end
+    DescribeObject("frame", BankFrame)
+    DiagnosticLine("bounds top=" .. tostring(BankFrame:GetTop()) .. " bottom=" .. tostring(BankFrame:GetBottom()) .. " width=" .. tostring(BankFrame:GetWidth()) .. " height=" .. tostring(BankFrame:GetHeight()) .. " artworkBottomInset=" .. artworkBottomInset)
+    local regions = {BankFrame:GetRegions()}
+    for i, region in ipairs(regions) do DescribeObject("region[" .. i .. "]", region) end
+    for i, object in ipairs(stockObjects) do DescribeObject("stock[" .. i .. "]", object) end
+    DescribeObject("reagentPage", view)
+    if view then
+        DescribeObject("contentMask", view.contentMask)
+        DescribeObject("controls", view.controls)
+        DescribeObject("bankTab", view.bankTab)
+        DescribeObject("reagentTab", view.reagentTab)
+    end
+end
+
+local function AssertDiagnosticState()
+    if not NR.bankFrameDiagnostics or not view then return end
+    local failures = {}
+    if reagentsSelected then
+        for _, object in ipairs(stockObjects) do if object:IsShown() then table.insert(failures, ObjectName(object) .. " is shown") end end
+        for _, region in ipairs(stockLabels) do if region:IsShown() then table.insert(failures, "stock label is shown") end end
+        if not view:IsShown() then table.insert(failures, "reagent page is hidden") end
+    end
+    for _, shared in ipairs({BankPortraitTexture, BankFrameTitleText, BankCloseButton}) do
+        if shared and not shared:IsShown() then table.insert(failures, ObjectName(shared) .. " is hidden") end
+    end
+    if reagentsSelected and view:GetBottom() and view.tabAnchor:GetBottom() then
+        if view:GetBottom() <= view.tabAnchor:GetBottom() then table.insert(failures, "reagent page crosses the visible bottom border") end
+        if math.abs((view.bankTab:GetTop() or 0) - view.tabAnchor:GetBottom()) > 1 then table.insert(failures, "Bank tab is detached from the border anchor") end
+        if view.controls:GetBottom() < view:GetBottom() then table.insert(failures, "controls extend below the reagent page") end
+        if view.deposit:GetBottom() < view.controls:GetBottom() or view.deposit:GetTop() > view.controls:GetTop() then table.insert(failures, "deposit button exceeds controls bounds") end
+        if view.auto:GetBottom() < view.controls:GetBottom() or view.auto:GetTop() > view.controls:GetTop() then table.insert(failures, "auto-deposit exceeds controls bounds") end
+        if view.previous:GetBottom() <= view.controls:GetTop() or view.next:GetBottom() <= view.controls:GetTop() then table.insert(failures, "pagination overlaps deposit controls") end
+        if buttons[perPage]:GetBottom() <= view.previous:GetTop() then table.insert(failures, "reagent grid overlaps pagination") end
+    end
+    if #failures == 0 then DiagnosticLine("runtime visibility assertions passed")
+    else for _, failure in ipairs(failures) do DiagnosticLine("ASSERT " .. failure) end end
 end
 
 local function SortedItems()
@@ -178,6 +255,7 @@ local function ShowReagents()
     SetTab(2)
     Refresh()
     NR.RequestSync()
+    AssertDiagnosticState()
 end
 
 local function ShowBank()
@@ -185,36 +263,46 @@ local function ShowBank()
     view:Hide()
     RestoreStock()
     SetTab(1)
+    AssertDiagnosticState()
 end
 
 local function Build()
     if view or not BankFrame then return end
 
-    FindStockFrames()
-    InstallStockVisibilityGuards()
+    FindStockObjects()
+    InstallStockVisibilityGuard()
 
     -- Publish the frame and button arrays only after every item button exists. If a
     -- previous interrupted load left named frames behind, reuse them exactly once.
     local candidate = _G.NativeReagentsBankFrame or CreateFrame("Frame", "NativeReagentsBankFrame", BankFrame)
     local createdButtons = {}
     candidate:ClearAllPoints()
-    candidate:SetPoint("TOPLEFT", BankFrame, "TOPLEFT", 22, -58)
-    candidate:SetPoint("BOTTOMRIGHT", BankFrame, "BOTTOMRIGHT", -43, 68)
+    -- Keep the overlay inside the stock border: top=68 clears the portrait and
+    -- title, and its bottom leaves four UI units above the measured artwork edge.
+    candidate:SetPoint("TOPLEFT", BankFrame, "TOPLEFT", 22, -68)
+    candidate:SetPoint("BOTTOMRIGHT", BankFrame, "BOTTOMRIGHT", -43, artworkBottomInset + 4)
     candidate:SetFrameLevel(BankFrame:GetFrameLevel() + 8)
     candidate:EnableMouseWheel(true)
 
-    local background = candidate.background or candidate:CreateTexture(nil, "BACKGROUND")
-    candidate.background = background
-    background:SetAllPoints()
-    background:SetTexture("Interface\\BankFrame\\Bank-Background")
-    background:SetTexCoord(0, 0.70, 0, 0.78)
+    -- UI-BankFrame is one monolithic stock texture: its slot outlines, bag bars,
+    -- outer border, and title surround cannot be hidden independently.  This
+    -- opaque content mask covers only the inventory interior while leaving the
+    -- shared portrait/title/close button and outer border exposed.  A solid
+    -- texture avoids the post-Wrath Bank-Background asset used by the old code.
+    local contentMask = candidate.contentMask or candidate:CreateTexture(nil, "BACKGROUND")
+    candidate.contentMask = contentMask
+    contentMask:ClearAllPoints()
+    contentMask:SetPoint("TOPLEFT", candidate, "TOPLEFT", 0, 0)
+    contentMask:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", 0, 0)
+    contentMask:SetTexture(0.035, 0.03, 0.025, 1)
 
+    local tabAnchor = _G.NativeReagentsTabAnchor or CreateFrame("Frame", "NativeReagentsTabAnchor", BankFrame)
+    tabAnchor:ClearAllPoints()
+    tabAnchor:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 30, artworkBottomInset)
+    tabAnchor:SetSize(1, 1)
     local bankTab = _G.NativeReagentsBankTab or CreateFrame("Button", "NativeReagentsBankTab", BankFrame, "CharacterFrameTabButtonTemplate")
     bankTab:ClearAllPoints()
-    -- BankFrame is 512 high, but its visible artwork ends about 70 UI units
-    -- above its geometric bottom.  Anchor to that artwork edge, not the
-    -- transparent tail represented by BankFrame's bottom.
-    bankTab:SetPoint("TOPLEFT", BankFrame, "BOTTOMLEFT", 30, 70)
+    bankTab:SetPoint("TOPLEFT", tabAnchor, "BOTTOMLEFT", 0, 0)
     bankTab:SetFrameLevel(BankFrame:GetFrameLevel() + 9)
     bankTab:SetText("Bank")
     bankTab:SetScript("OnClick", ShowBank)
@@ -231,7 +319,7 @@ local function Build()
     local controls = candidate.controls or CreateFrame("Frame", nil, candidate)
     candidate.controls = controls
     controls:ClearAllPoints()
-    controls:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 4)
+    controls:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 8)
     controls:SetSize(360, 44)
     controls:SetFrameLevel(candidate:GetFrameLevel() + 1)
     local divider = controls.divider or controls:CreateTexture(nil, "ARTWORK")
@@ -239,8 +327,7 @@ local function Build()
     divider:ClearAllPoints()
     divider:SetPoint("TOP", controls, "TOP", 0, 0)
     divider:SetSize(346, 1)
-    divider:SetTexture("Interface\\Buttons\\WHITE8X8")
-    divider:SetVertexColor(0.45, 0.36, 0.16)
+    divider:SetTexture(0.45, 0.36, 0.16, 1)
 
     local deposit = _G.NativeReagentsDepositButton or CreateFrame("Button", "NativeReagentsDepositButton", controls, "UIPanelButtonTemplate")
     deposit:SetParent(controls)
@@ -269,26 +356,26 @@ local function Build()
     local previous = _G.NativeReagentsPrevious or CreateFrame("Button", "NativeReagentsPrevious", candidate, "UIPanelButtonTemplate")
     previous:SetSize(90, 22)
     previous:ClearAllPoints()
-    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 60)
+    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 64)
     previous:SetText("Previous")
     previous:SetScript("OnClick", function() page = math.max(0, page - 1); Refresh() end)
 
     local nextButton = _G.NativeReagentsNext or CreateFrame("Button", "NativeReagentsNext", candidate, "UIPanelButtonTemplate")
     nextButton:SetSize(90, 22)
     nextButton:ClearAllPoints()
-    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 60)
+    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 64)
     nextButton:SetText("Next")
     nextButton:SetScript("OnClick", function() page = page + 1; Refresh() end)
 
     local pageText = candidate.pageText or candidate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     candidate.pageText = pageText
     pageText:ClearAllPoints()
-    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 65)
+    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 69)
 
     local statusText = candidate.statusText or candidate:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     candidate.statusText = statusText
     statusText:ClearAllPoints()
-    statusText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 91)
+    statusText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 96)
 
     candidate:SetScript("OnMouseWheel", function(_, delta)
         if NR.IsReady() then page = math.max(0, page - delta); Refresh() end
@@ -300,7 +387,7 @@ local function Build()
         local column, row = (slot - 1) % columns, math.floor((slot - 1) / columns)
         button:ClearAllPoints()
         button:SetSize(slotWidth, slotHeight)
-        button:SetPoint("TOPLEFT", candidate, "TOPLEFT", 10 + column * columnPitch, -16 - row * rowPitch)
+        button:SetPoint("TOPLEFT", candidate, "TOPLEFT", 10 + column * columnPitch, -12 - row * rowPitch)
         button:SetFrameLevel(candidate:GetFrameLevel() + 2)
         local normal = button:GetNormalTexture()
         if normal then
@@ -344,7 +431,7 @@ local function Build()
         createdButtons[slot] = button
     end
 
-    candidate.bankTab, candidate.reagentTab = bankTab, reagentTab
+    candidate.tabAnchor, candidate.bankTab, candidate.reagentTab = tabAnchor, bankTab, reagentTab
     candidate.deposit, candidate.auto = deposit, auto
     candidate.previous, candidate.next = previous, nextButton
     view, buttons = candidate, createdButtons
@@ -369,12 +456,6 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("BANKFRAME_OPENED")
 events:RegisterEvent("BANKFRAME_CLOSED")
-events:RegisterEvent("ITEM_LOCK_CHANGED")
-events:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
-events:RegisterEvent("PLAYERBANKBAGSLOTS_CHANGED")
-events:RegisterEvent("PLAYER_MONEY")
-events:RegisterEvent("BAG_UPDATE")
-events:RegisterEvent("BAG_UPDATE_COOLDOWN")
 events:SetScript("OnEvent", function(_, event)
     Build()
     if event == "BANKFRAME_OPENED" then
@@ -387,7 +468,5 @@ events:SetScript("OnEvent", function(_, event)
     elseif event == "BANKFRAME_CLOSED" then
         ShowBank()
         if view then view.bankTab:Hide(); view.reagentTab:Hide() end
-    else
-        RefreshStockVisibility()
     end
 end)

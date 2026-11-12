@@ -43,6 +43,15 @@ def main() -> None:
     lua = (ROOT / "content/client/Interface/FrameXML/NativeReagents.lua").read_text()
     for api in ("IsAvailable", "IsReady", "GetStatus", "IsBankOpen", "GetItems", "GetQuantity", "DepositAll", "Withdraw", "GetAutoDeposit", "SetAutoDeposit", "RegisterCallback", "RegisterPresentation"):
         require(("function NR." + api) in lua, "missing Lua API " + api)
+    bank_lua = (ROOT / "content/client/Interface/FrameXML/NativeReagentsBank.lua").read_text()
+    require("local columns, rows, perPage = 7, 5, 35" in bank_lua, "reagent page must use the five-row layout")
+    require("Bank-Background" not in bank_lua.replace("post-Wrath Bank-Background", ""),
+            "client references the post-Wrath Bank-Background texture")
+    require('hooksecurefunc("UpdateBagSlotStatus", EnforceStockHidden)' in bank_lua,
+            "purchase-info refresh guard is missing")
+    require(bank_lua.count("hooksecurefunc(") == 1, "bank page installed unexpected visibility hooks")
+    require("function NR.DumpBankFrame()" in bank_lua and "function NR.SetBankFrameDiagnostics" in bank_lua,
+            "opt-in BankFrame diagnostics are missing")
 
     with tempfile.TemporaryDirectory(prefix="native-reagents-tests-") as directory:
         binary = pathlib.Path(directory) / "protocol_tests"

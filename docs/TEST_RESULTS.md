@@ -1,4 +1,4 @@
-# Test results — 2026-11-11
+# Test results — 2026-11-12
 
 ## Executed successfully
 
@@ -16,6 +16,14 @@
     backward-compatible/non-destructive SQL, additive journal schema, transaction guards,
     ambiguous-COMMIT fail-stop guards, quest protection, limits, client API surface,
     deterministic EPF rebuild, and exact archive membership passed.
+  - Both Lua files compiled through the available Lua library. The executable mocked-FrameXML
+    harness created all 42 item buttons before refresh and passed empty/populated two-page
+    rendering, navigation, mutually exclusive page visibility, stock slot/bag restoration,
+    and Bank-default close/reopen behavior.
+  - The same syntax and lifecycle harness passed when linked directly to Lua 5.1.5 from a
+    temporary extracted development package, confirming the client files do not rely on newer
+    Lua syntax. The reference audit also confirmed the used templates and panel/item APIs occur
+    before `BankFrame.xml` in the pinned build-12340 FrameXML load order.
 - The actual `mod-content-manager` `ContentPackage` parser/validator was compiled from the
   adjacent current source and accepted `content/mod-native-reagents.epf`, including its
   Schema-3 additive FrameXML declaration and pinned TOC.
@@ -30,6 +38,12 @@
   and `libmysqlclient` from the host's existing dependency cache were used; this also verified
   the module against the actual MySQL-facing database API. The successful final command was
   `cmake --build . --target worldserver -j2`.
+- The corrective C++ changes were also rebuilt on 2026-11-12 against an archive of
+  `e7e2e288e7d9ec30e2dfe6f417178a95986fcbb2`. AzerothCore CMake discovered the module, and
+  `cmake --build build --target modules -j2` compiled `NativeReagentsManager.cpp`,
+  `NativeReagentsProtocol.cpp`, `NativeReagentsScripts.cpp`, and the loader, then linked
+  `libmodules.a` successfully. A temporary extracted Ubuntu MySQL 8.4.13 development package
+  supplied headers/library metadata because the host package was not installed.
 
 ## Environment limitation
 

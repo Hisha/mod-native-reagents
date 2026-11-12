@@ -1,6 +1,6 @@
 # mod-native-reagents
 
-Native reagent banking for AzerothCore 3.3.5a. It adds a **Personal Bank | Reagents**
+Native reagent banking for AzerothCore 3.3.5a. It adds a **Bank | Reagents**
 experience to Blizzard's stock bank, automatic and manual deposits, stack-aware withdrawals,
 and crafting from stored materials. The interface is injected through
 `mod-content-manager`; no separately installed WoW addon is required.
@@ -12,7 +12,8 @@ original projects remain usable on their own and are not dependencies of this mo
 
 - Character-specific reagent storage using the established
   `character_bank_reagents` and `character_bank_reagent_settings` tables.
-- Personal Bank remains the default. A stock-styled Reagents view supplies icons,
+- Bank remains the default and is Blizzard's unmodified BankFrame content. A full-page,
+  stock-styled Reagents view supplies a 7-by-6 icon grid,
   quantities, item tooltips, quality borders, paging, right-click stack withdrawal,
   and shift-click quantity entry.
 - Manual **Deposit Reagents** and persistent **Auto Deposit** controls.
@@ -37,6 +38,25 @@ original projects remain usable on their own and are not dependencies of this mo
 
 `mod-bank-reagents` and `mod-native-reagents` **must not run simultaneously**. Both own the
 same tables and banker/crafting hooks. BankReagentsUI and UnifiedBags335 are not required.
+
+## Bank interface
+
+The approved visual targets are [`design/Bank Tab mockup.png`](design/Bank%20Tab%20mockup.png)
+and [`design/Reagent Tab mockup.png`](design/Reagent%20Tab%20mockup.png). They are design
+references only and are not shipped as interface textures.
+
+Opening a banker always selects **Bank**. That page is the original Blizzard BankFrame: its
+28 bank slots, seven bank-bag slots, purchased bags, purchase controls, money display,
+portrait, title, close button, artwork, size, and behavior remain owned by stock FrameXML.
+Blizzard-style **Bank** and **Reagents** tabs are anchored to BankFrame below its visible bottom
+border, so they follow the frame at every UI scale.
+
+**Reagents** is a separate BankFrame child page, not an overlay of usable bank slots. While it
+is selected, the module records and hides only the stock inventory, bank-bag, purchase, and
+money controls, covers the content area with stock artwork, and displays 42 reagent slots,
+quality borders, quantities, tooltips, an empty state, mouse-wheel/button pagination,
+**Auto Deposit**, and **Deposit Reagents**. Returning to Bank restores each stock control to
+its prior visibility state. Closing and reopening the bank always resets the page to Bank.
 
 ## Installation
 
@@ -66,7 +86,7 @@ AddOns folder is neither supported nor required.
 | Setting | Default | Meaning |
 | --- | ---: | --- |
 | `NativeReagents.Enable` | `1` | Master switch. |
-| `NativeReagents.Debug` | `0` | Reserved diagnostic switch. |
+| `NativeReagents.Debug` | `0` | Log reagent operation authorization outcome and rejection reason. |
 | `NativeReagents.AutoDeposit.Enable` | `1` | Permit per-character Auto Deposit. |
 | `NativeReagents.Storage.MaxTypes` | `0` | Maximum distinct entries; `0` is unlimited. |
 | `NativeReagents.Storage.MaxQuantityPerItem` | `0` | Per-entry cap; `0` is unlimited. |
@@ -79,9 +99,11 @@ AddOns folder is neither supported nor required.
 
 The server derives deposits from real inventory and withdrawals from stored rows. Client
 item IDs and quantities are requests, never evidence. Bank-only mutations use AzerothCore's
-normal `GetNPCIfCanInteractWith` banker validation. The session is created only by the
-server-side banker interaction hook, is never created by `BANKOPEN`, and is cleared by bank
-close, range/NPC failure, timeout, or logout.
+normal `GetNPCIfCanInteractWith` banker validation. The session is created only after the
+server observes and validates `CMSG_BANKER_ACTIVATE`; the client `BANKOPEN` message can only
+confirm that existing server session. It cannot create authority. The session is cleared by
+bank close, range/NPC failure, timeout, or logout. `NativeReagents.Debug=1` logs the operation,
+authorization outcome, and precise reason without adding normal-gameplay log noise.
 
 Inventory changes use `Player::SaveToDB(CharacterDatabaseTransaction, ...)` in the same
 characters-database transaction as absolute storage balances and an operation-journal marker.
@@ -164,3 +186,8 @@ available AzerothCore headers are supported. The module also compiled into Azero
 `e7e2e288e`. UI behavior, live SQL commits, crafting interruption, cumulative MPQ generation,
 and Portalkeeper delivery require the live plan and must not be inferred from build/static
 checks alone.
+
+Known limitations: the precise tab offsets, content crop, tooltip behavior, bank-bag purchase
+popups, and controls at non-default UI scales still require the patched 3.3.5a client matrix.
+Automated tests model the FrameXML lifecycle but do not render Blizzard textures. Remote
+crafting remains outside this corrective pass and disabled by default.

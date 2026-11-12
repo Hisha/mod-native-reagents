@@ -7,11 +7,14 @@
 #include "Item.h"
 #include "Player.h"
 #include "PlayerScript.h"
+#include "ServerScript.h"
 #include "ScriptMgr.h"
 #include "ScriptedGossip.h"
 #include "Spell.h"
 #include "SpellInfo.h"
 #include "WorldSession.h"
+#include "WorldPacket.h"
+#include "Opcodes.h"
 
 namespace
 {
@@ -44,15 +47,16 @@ public:
     bool CanCreatureGossipHello(Player* player, Creature* creature) override
     {
         if (!sNativeReagents.IsEnabled() || !IsBanker(creature)) return false;
-        sNativeReagents.NoteBanker(player, creature);
         // Injected FrameXML identifies itself at login. Sending the stock bank packet
         // keeps Personal Bank as the default surface. Unpatched clients get a small,
         // server-only recovery menu instead of losing access to their stored items.
         if (sNativeReagents.IsUiEnabled() && sNativeReagents.HasNativeSession(player))
         {
+            sNativeReagents.NoteBanker(player, creature);
             player->GetSession()->SendShowBank(creature->GetGUID());
             return true;
         }
+        sNativeReagents.NoteBanker(player, creature, true);
         FallbackMenu(player, creature);
         return true;
     }
@@ -60,7 +64,7 @@ public:
     bool CanCreatureGossipSelect(Player* player, Creature* creature, uint32 sender, uint32 action) override
     {
         if (!sNativeReagents.IsEnabled() || !IsBanker(creature) || sender != Sender) return false;
-        sNativeReagents.NoteBanker(player, creature);
+        sNativeReagents.NoteBanker(player, creature, true);
         if (action == OpenBank) { player->GetSession()->SendShowBank(creature->GetGUID()); return true; }
         if (action == Deposit)
         {
@@ -77,6 +81,26 @@ public:
             FallbackMenu(player, creature); return true;
         }
         return false;
+    }
+};
+
+class NativeReagentsServerScript : public ServerScript
+{
+public:
+    NativeReagentsServerScript() : ServerScript("NativeReagentsServerScript") { }
+
+    bool CanPacketReceive(WorldSession* session, WorldPacket const& packet) override
+    {
+        if (!sNativeReagents.IsEnabled() || !session || !session->GetPlayer() ||
+            packet.GetOpcode() != CMSG_BANKER_ACTIVATE)
+            return true;
+
+        WorldPacket copy(packet);
+        ObjectGuid bankerGuid;
+        copy >> bankerGuid;
+        if (Creature* banker = session->GetPlayer()->GetNPCIfCanInteractWith(bankerGuid, UNIT_NPC_FLAG_BANKER))
+            sNativeReagents.NoteBanker(session->GetPlayer(), banker);
+        return true;
     }
 };
 
@@ -119,6 +143,7 @@ public:
 void AddNativeReagentsScripts()
 {
     new NativeReagentsCreatureScript();
+    new NativeReagentsServerScript();
     new NativeReagentsSpellScript();
     new NativeReagentsPlayerScript();
 }

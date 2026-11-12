@@ -47,6 +47,16 @@ def main() -> None:
         safety = pathlib.Path(directory) / "safety_model_tests"
         subprocess.run(["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror", str(ROOT / "tests/safety_model_tests.cpp"), "-o", str(safety)], check=True)
         subprocess.run([str(safety)], check=True)
+        lua_flags = subprocess.run(
+            ["pkg-config", "--cflags", "--libs", "lua"], check=True, text=True, capture_output=True
+        ).stdout.split()
+        lua_runner = pathlib.Path(directory) / "lua_runner"
+        subprocess.run(["c++", "-std=c++17", "-Wall", "-Wextra", "-Werror",
+                        str(ROOT / "tests/lua_runner.cpp"), *lua_flags, "-o", str(lua_runner)], check=True)
+        subprocess.run([str(lua_runner), "--syntax",
+                        str(ROOT / "content/client/Interface/FrameXML/NativeReagents.lua"),
+                        str(ROOT / "content/client/Interface/FrameXML/NativeReagentsBank.lua")], check=True)
+        subprocess.run([str(lua_runner), str(ROOT / "tests/wow_ui_harness.lua")], cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/test_sync_protocol.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "content/build_epf.py")], cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / "content/build_epf.py"), "--check"], cwd=ROOT, check=True)

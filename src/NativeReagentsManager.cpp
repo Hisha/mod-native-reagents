@@ -436,10 +436,45 @@ bool Manager::Withdraw(Player* player, uint32 entry, uint32 amount, std::string&
     return true;
 }
 
-void Manager::NoteBanker(Player* player, Creature* banker)
+void Manager::NoteBanker(Player* player, Creature* banker, bool clientOpened)
 {
     if (player && banker && (banker->GetNpcFlags() & UNIT_NPC_FLAG_BANKER))
-        Bankers[Guid(player)] = {banker->GetGUID(), std::chrono::steady_clock::now(), true};
+        Bankers[Guid(player)] = {banker->GetGUID(), std::chrono::steady_clock::now(), clientOpened};
+}
+
+bool Manager::ConfirmBankerOpen(Player* player, std::string* reason)
+{
+    if (!player)
+    {
+        if (reason) *reason = "no-player";
+        return false;
+    }
+    auto found = Bankers.find(Guid(player));
+    if (found == Bankers.end())
+    {
+        if (reason) *reason = "no-server-session";
+        return false;
+    }
+    uint32 timeout = std::max<uint32>(5,
+        sConfigMgr->GetOption<uint32>("NativeReagents.BankerSession.TimeoutSeconds", 300));
+    auto age = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - found->second.touched).count();
+    if (age >= timeout)
+    {
+        if (reason) *reason = "expired";
+        Bankers.erase(found);
+        return false;
+    }
+    if (!player->GetNPCIfCanInteractWith(found->second.banker, UNIT_NPC_FLAG_BANKER))
+    {
+        if (reason) *reason = "banker-not-interactable";
+        Bankers.erase(found);
+        return false;
+    }
+    found->second.clientOpened = true;
+    found->second.touched = std::chrono::steady_clock::now();
+    if (reason) *reason = "authorized";
+    return true;
 }
 
 void Manager::CloseBanker(Player* player)
@@ -453,24 +488,38 @@ bool Manager::HasNativeSession(Player* player) const
     return player && NativeSessions.find(Guid(player)) != NativeSessions.end();
 }
 
-bool Manager::CanUseReagentBank(Player* player) const
+bool Manager::CanUseReagentBank(Player* player, std::string* reason) const
 {
     if (!player)
+    {
+        if (reason) *reason = "no-player";
         return false;
+    }
     auto found = Bankers.find(Guid(player));
-    if (found == Bankers.end() || !found->second.clientOpened)
+    if (found == Bankers.end())
+    {
+        if (reason) *reason = "no-server-session";
         return false;
+    }
+    if (!found->second.clientOpened)
+    {
+        if (reason) *reason = "client-not-open";
+        return false;
+    }
     uint32 timeout = std::max<uint32>(5,
         sConfigMgr->GetOption<uint32>("NativeReagents.BankerSession.TimeoutSeconds", 300));
     auto age = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::steady_clock::now() - found->second.touched).count();
+    bool expired = age >= timeout;
     bool interactable = player->GetNPCIfCanInteractWith(found->second.banker, UNIT_NPC_FLAG_BANKER) != nullptr;
-    if (!Safety::BankSessionUsable(found->second.clientOpened, age >= timeout, interactable))
+    if (!Safety::BankSessionUsable(found->second.clientOpened, expired, interactable))
     {
+        if (reason) *reason = expired ? "expired" : "banker-not-interactable";
         Bankers.erase(found);
         return false;
     }
     found->second.touched = std::chrono::steady_clock::now();
+    if (reason) *reason = "authorized";
     return true;
 }
 
@@ -482,6 +531,15 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
     auto const& request = *parsed;
     auto reply = [&](std::string_view kind, std::string_view body = {}) { return Protocol::Reply(request.id, kind, body); };
     if (!IsEnabled()) return reply("ERR", "disabled");
+    auto authorize = [&](bool confirmOpen = false)
+    {
+        std::string reason;
+        bool allowed = confirmOpen ? ConfirmBankerOpen(player, &reason) : CanUseReagentBank(player, &reason);
+        if (sConfigMgr->GetOption<bool>("NativeReagents.Debug", false))
+            LOG_INFO("module", "Native Reagents authorization operation={} character={} outcome={} reason={}",
+                request.command, Guid(player), allowed ? "allowed" : "rejected", reason);
+        return allowed;
+    };
 
     if (request.command == "HELLO")
     {
@@ -553,8 +611,8 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
     if (request.command == "BANKOPEN")
     {
         // This message confirms only client presentation state. The session itself
-        // was established by the server-side creature interaction hook.
-        if (!CanUseReagentBank(player)) return reply("ERR", "banker-required");
+        // was established from AzerothCore's validated banker-activation path.
+        if (!authorize(true)) return reply("ERR", "banker-required");
         std::string error;
         uint64 deposited = IsAutoDepositEnabled(player) ? DepositAll(player, error, requestKey) : 0;
         return error.empty() ? reply("BANK", std::to_string(deposited) + "|" + (IsAutoDepositEnabled(player) ? "1" : "0")) : reply("ERR", error);
@@ -566,7 +624,7 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
     }
     if (request.command == "DEPOSIT")
     {
-        if (!CanUseReagentBank(player)) return finish(reply("ERR", "banker-required"));
+        if (!authorize()) return finish(reply("ERR", "banker-required"));
         std::string error; uint64 amount = DepositAll(player, error, requestKey);
         return finish(error.empty() ? reply("DEPOSITED", std::to_string(amount)) : reply("ERR", error));
     }
@@ -574,14 +632,15 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
     {
         if (request.arguments.empty()) return finish(reply("AUTO", IsAutoDepositEnabled(player) ? "1" : "0"));
         uint32 enabled = 0;
-        if (!CanUseReagentBank(player) || !ParseArg(request.arguments, 0, enabled) || enabled > 1) return finish(reply("ERR", "banker-required"));
+        if (!authorize()) return finish(reply("ERR", "banker-required"));
+        if (!ParseArg(request.arguments, 0, enabled) || enabled > 1) return finish(reply("ERR", "bad-auto-deposit"));
         if (!SetAutoDeposit(player, enabled != 0)) return finish(reply("ERR", "auto-deposit-disabled"));
         return finish(reply("AUTO", enabled ? "1" : "0"));
     }
     if (request.command == "WITHDRAW")
     {
         uint32 entry = 0, amount = 0;
-        if (!CanUseReagentBank(player)) return finish(reply("ERR", "banker-required"));
+        if (!authorize()) return finish(reply("ERR", "banker-required"));
         if (!ParseArg(request.arguments, 0, entry) || !ParseArg(request.arguments, 1, amount)) return finish(reply("ERR", "bad-withdrawal"));
         std::string error;
         return finish(Withdraw(player, entry, amount, error, requestKey) ? reply("WITHDRAWN", std::to_string(entry) + "|" + std::to_string(amount)) : reply("ERR", error));

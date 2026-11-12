@@ -32,10 +32,11 @@ public:
     std::vector<StorageRow> List(Player* player, uint32 offset, uint32 limit) const;
     uint64 DepositAll(Player* player, std::string& error, uint64 operationId = 0) const;
     bool Withdraw(Player* player, uint32 itemEntry, uint32 amount, std::string& error, uint64 operationId = 0) const;
-    void NoteBanker(Player* player, Creature* banker);
+    void NoteBanker(Player* player, Creature* banker, bool clientOpened = false);
+    bool ConfirmBankerOpen(Player* player, std::string* reason = nullptr);
     void CloseBanker(Player* player);
     bool HasNativeSession(Player* player) const;
-    bool CanUseReagentBank(Player* player) const;
+    bool CanUseReagentBank(Player* player, std::string* reason = nullptr) const;
     std::string HandleRequest(Player* player, std::string const& payload);
     void OnSpellCheckCast(Spell* spell, SpellCastResult& result);
     void OnSpellCast(Player* player, SpellInfo const* spellInfo);

@@ -6,6 +6,7 @@ NR.items, NR.callbacks, NR.available, NR.bankOpen = {}, {}, false, false
 NR.autoDeposit, NR.autoKnown, NR.syncing = false, false, false
 NR.status, NR.protocolVersion = "unavailable", nil
 NR.remoteEnabled = false
+NR.pending, NR.bankAuthorizationWarned, NR.lastError = {}, false, nil
 NR.sequence = math.random(100000, 900000)
 NR.syncSequence, NR.activeSync, NR.resyncPending = 0, nil, false
 NR.syncTimeout, NR.syncMaxRetries = 3.0, 2
@@ -19,6 +20,7 @@ local function Send(command, ...)
     if NR.sequence > 2000000000 then NR.sequence = 1 end
     local payload = VERSION .. "|" .. NR.sequence .. "|" .. command
     for i = 1, select("#", ...) do payload = payload .. "|" .. tostring(select(i, ...)) end
+    NR.pending[NR.sequence] = command
     SendAddonMessage(PREFIX, payload, "WHISPER", UnitName("player"))
     return NR.sequence
 end
@@ -33,6 +35,7 @@ end
 function NR.IsAvailable() return NR.available end
 function NR.IsReady() return NR.available and NR.status == "ready" end
 function NR.GetStatus() return NR.status end
+function NR.GetLastError() return NR.lastError end
 function NR.IsBankOpen() return NR.bankOpen end
 function NR.GetItems() return NR.items end
 function NR.GetQuantity(itemId) return NR.items[tonumber(itemId)] or 0 end
@@ -153,7 +156,10 @@ events:RegisterEvent("PLAYER_LOGIN"); events:RegisterEvent("CHAT_MSG_ADDON"); ev
 events:RegisterEvent("BANKFRAME_CLOSED"); events:RegisterEvent("ADDON_LOADED"); events:RegisterEvent("TRADE_SKILL_UPDATE"); events:RegisterEvent("BAG_UPDATE")
 events:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then NR.helloStarted = GetTime(); Send("HELLO"); StartSync(0); return end
-    if event == "BANKFRAME_OPENED" then NR.bankOpen = true; Send("BANKOPEN"); Fire("BANK_OPENED"); return end
+    if event == "BANKFRAME_OPENED" then
+        NR.bankOpen, NR.bankAuthorizationWarned, NR.lastError = true, false, nil
+        Send("BANKOPEN"); Fire("BANK_OPENED"); return
+    end
     if event == "BANKFRAME_CLOSED" then NR.bankOpen = false; Send("BANKCLOSE"); Fire("BANK_CLOSED"); return end
     if event == "ADDON_LOADED" then if (...) == "Blizzard_TradeSkillUI" then InstallTradeSkill(); NR.RequestSync() end return end
     if event == "TRADE_SKILL_UPDATE" or event == "BAG_UPDATE" then if TradeSkillFrame and TradeSkillFrame:IsShown() then RefreshTradeSkill(); NR.RequestSync() end return end
@@ -161,6 +167,9 @@ events:SetScript("OnEvent", function(self, event, ...)
     if prefix ~= PREFIX or channel ~= "WHISPER" or sender ~= UnitName("player") then return end
     local version, request, kind, body = string.match(message, "^(%d+)|(%d+)|([^|]+)|?(.*)$")
     if tonumber(version) ~= VERSION then return end
+    request = tonumber(request)
+    local command = NR.pending[request]
+    NR.pending[request] = nil
     NR.available = true; NR.protocolVersion = tonumber(version)
     if kind == "HELLO" then local remote = string.match(body, "^([01])|"); NR.remoteEnabled = remote == "1"; InstallTradeSkill(); Fire("AVAILABLE", true); return end
     if kind == "DATA" then
@@ -184,10 +193,22 @@ events:SetScript("OnEvent", function(self, event, ...)
         CompleteSync(sync)
         return
     end
-    if kind == "BANK" then local deposited, enabled = string.match(body, "^(%d+)|([01])$"); NR.autoDeposit, NR.autoKnown = enabled == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); if tonumber(deposited) and tonumber(deposited) > 0 then NR.RequestSync() end return end
-    if kind == "AUTO" then NR.autoDeposit, NR.autoKnown = body == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); return end
-    if kind == "DEPOSITED" or kind == "WITHDRAWN" then NR.RequestSync(); return end
-    if kind == "ERR" then Notice(body); Fire("ERROR", body); return end
+    if kind == "BANK" then local deposited, enabled = string.match(body, "^(%d+)|([01])$"); NR.lastError = nil; NR.autoDeposit, NR.autoKnown = enabled == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); if tonumber(deposited) and tonumber(deposited) > 0 then NR.RequestSync() end return end
+    if kind == "AUTO" then NR.lastError = nil; NR.autoDeposit, NR.autoKnown = body == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); return end
+    if kind == "DEPOSITED" or kind == "WITHDRAWN" then NR.lastError = nil; NR.RequestSync(); return end
+    if kind == "ERR" then
+        NR.lastError = body
+        if body == "banker-required" then
+            if command ~= "BANKOPEN" and not NR.bankAuthorizationWarned then
+                NR.bankAuthorizationWarned = true
+                Notice("This reagent operation requires an active banker session.")
+            end
+        else
+            Notice(body)
+        end
+        Fire("ERROR", body, command)
+        return
+    end
 end)
 
 local watchdog = CreateFrame("Frame")

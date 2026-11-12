@@ -8,6 +8,7 @@ the default bank presentation.
 | `IsAvailable()` | Server capability handshake completed. |
 | `IsReady()` | A complete current reagent snapshot has been atomically published. |
 | `GetStatus()` | `unavailable`, `loading`, `ready`, or `failed`. |
+| `GetLastError()` | Last server rejection body, or `nil` after the next confirmed operation/bank open. |
 | `IsBankOpen()` | The stock personal bank session is open. |
 | `GetItems()` | Read-only-by-convention snapshot table keyed by item ID. Do not mutate it. |
 | `GetQuantity(itemId)` | Synchronized stored quantity or `0`. |

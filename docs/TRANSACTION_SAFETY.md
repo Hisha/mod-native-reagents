@@ -44,9 +44,11 @@ serialization and is unsupported.
 
 ## Banker sessions
 
-A session is created only in the server-side `AllCreatureScript` hook after a legitimate
-interaction with a banker. Client `BANKOPEN` merely confirms presentation and cannot create
-authority. Every mutation revalidates the same GUID with
+A pending session is created only when the server packet hook observes `CMSG_BANKER_ACTIVATE`
+and independently validates its creature GUID as an interactable banker. This covers the
+normal AzerothCore banker opcode path, which does not pass through creature gossip hooks.
+Client `BANKOPEN` merely confirms that pending session and cannot create authority. Every
+mutation revalidates the same GUID with
 `GetNPCIfCanInteractWith(..., UNIT_NPC_FLAG_BANKER)`. Close, logout, timeout, distance, death,
 or NPC unavailability invalidates the session. Targeting a banker is insufficient.
 

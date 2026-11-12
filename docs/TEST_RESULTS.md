@@ -4,9 +4,12 @@
 
 - `python3 tests/run_checks.py`
   - Protocol, safety/conservation model, synchronization, Lua syntax, mocked build-12340
-    FrameXML lifecycle, Bank/Reagents switching, 42-slot paging, stock-bank restoration,
-    schema compatibility, and deterministic EPF checks passed.
-  - EPF SHA-256: `acef0a751624e72c93ced2a4b7477000f26e04d23de4af1816ad4293ac685dcb`.
+    FrameXML lifecycle, repeated Bank/Reagents switching, stock refresh suppression, 42-slot
+    paging, stock-bank restoration, schema compatibility, and deterministic EPF checks passed.
+  - EPF SHA-256: `1643b21f1d14a8f72eeb069f97dff30750cd4b94fa7d59672ecd61f282f686b1`.
+- Official Lua 5.1.5 `luac -p` and mocked FrameXML lifecycle execution
+  - Both client Lua files parsed successfully, and the complete UI harness passed under the
+    Lua 5.1.5 runtime.
 - `python3 tests/prepared_statement_audit.py --acore-source
   /home/smithkt/aicode_folder/azerothcore-wotlk`
   - Mapped `CHAR_UPD_CHARACTER` to ID 225 in `e7e2e288e` and confirmed it is

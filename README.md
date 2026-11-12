@@ -53,10 +53,12 @@ border, so they follow the frame at every UI scale.
 
 **Reagents** is a separate BankFrame child page, not an overlay of usable bank slots. While it
 is selected, the module records and hides only the stock inventory, bank-bag, purchase, and
-money controls, covers the content area with stock artwork, and displays 42 reagent slots,
+money controls. Conditional visibility guards keep those controls hidden if stock BankFrame
+updates run while the page is selected. The independent page displays 42 reagent slots,
 quality borders, quantities, tooltips, an empty state, mouse-wheel/button pagination,
-**Auto Deposit**, and **Deposit Reagents**. Returning to Bank restores each stock control to
-its prior visibility state. Closing and reopening the bank always resets the page to Bank.
+**Auto Deposit**, and **Deposit Reagents**. Returning to Bank disables the guards and restores
+each stock control to its prior visibility state. Closing and reopening the bank always resets
+the page to Bank.
 
 ## Installation
 

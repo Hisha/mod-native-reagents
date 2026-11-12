@@ -27,7 +27,14 @@ function Frame:RegisterForClicks(...) self.clicks = {...} end
 function Frame:SetID(id) self.id = id end
 function Frame:SetText(text) self.text = text end
 function Frame:GetText() return self.text end
-function Frame:Show() self.shown = true end
+function Frame:Show()
+    local wasShown = self.shown
+    self.shown = true
+    if not wasShown then
+        if self.scripts.OnShow then self.scripts.OnShow(self) end
+        for _, callback in ipairs((self.hooks and self.hooks.OnShow) or {}) do callback(self) end
+    end
+end
 function Frame:Hide() self.shown = false end
 function Frame:IsShown() return self.shown end
 function Frame:Enable() self.enabled = true end
@@ -39,6 +46,11 @@ function Frame:SetParent(parent) self.parent = parent end
 function Frame:GetObjectType() return self.objectType or "Frame" end
 function Frame:GetRegions() return (table.unpack or unpack)(self.regions or {}) end
 function Frame:HighlightText() self.highlighted = true end
+function Frame:HookScript(kind, callback)
+    self.hooks = self.hooks or {}
+    self.hooks[kind] = self.hooks[kind] or {}
+    table.insert(self.hooks[kind], callback)
+end
 
 local anonymousFrames = {}
 function CreateFrame(_, name, parent)
@@ -61,8 +73,26 @@ for index = 1, NUM_BANKGENERIC_SLOTS do Frame:new("BankFrameItem" .. index, Bank
 for index = 1, NUM_BANKBAGSLOTS do Frame:new("BankFrameBag" .. index, BankFrame) end
 BankFrameMoneyFrame = Frame:new("BankFrameMoneyFrame", BankFrame)
 BankFramePurchaseInfo = Frame:new("BankFramePurchaseInfo", BankFrame)
-BankFramePurchaseButton = Frame:new("BankFramePurchaseButton", BankFrame)
-BankFrameDetailMoneyFrame = Frame:new("BankFrameDetailMoneyFrame", BankFrame)
+BankFramePurchaseButton = Frame:new("BankFramePurchaseButton", BankFramePurchaseInfo)
+BankFrameDetailMoneyFrame = Frame:new("BankFrameDetailMoneyFrame", BankFramePurchaseInfo)
+
+function BankFrameItemButton_Update(button) button:Show() end
+function UpdateBagSlotStatus() BankFramePurchaseInfo:Show() end
+function BankFrame_OnShow()
+    for index = 1, NUM_BANKGENERIC_SLOTS do _G["BankFrameItem" .. index]:Show() end
+    for index = 1, NUM_BANKBAGSLOTS do _G["BankFrameBag" .. index]:Show() end
+    UpdateBagSlotStatus()
+end
+function BankFrame_OnEvent(_, event)
+    if event == "PLAYERBANKSLOTS_CHANGED" then BankFrameItem1:Show() end
+end
+function hooksecurefunc(name, callback)
+    local original = _G[name]
+    _G[name] = function(...)
+        original(...)
+        callback(...)
+    end
+end
 
 function PanelTemplates_TabResize() end
 function PanelTemplates_SelectTab(frame) frame.selected = true end
@@ -107,6 +137,7 @@ for slot = 1, 42 do assert(_G["NativeReagentsItem" .. slot], "missing reagent it
 assert(NativeReagentsBankTab.points[1][1] == "TOPLEFT", "Bank tab is not attached below BankFrame")
 assert(NativeReagentsBankTab.points[1][2] == BankFrame, "Bank tab lost its BankFrame anchor")
 assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached to the bottom border")
+assert(NativeReagentsBankTab.points[1][5] == 70, "Bank tab is not attached to BankFrame's visible bottom border")
 for slot = 1, 42 do
     local button = _G["NativeReagentsItem" .. slot]
     assert(button.width == 37 and button.height == 37, "reagent slot dimensions changed")
@@ -117,6 +148,7 @@ assert(NativeReagentsItem8.points[1][5] - NativeReagentsItem1.points[1][5] == -4
 assert(NativeReagentsPrevious.points[1][5] > NativeReagentsDepositButton.points[1][5], "pagination overlaps deposit controls")
 assert(NativeReagentsDepositButton.parent == NativeReagentsBankFrame.controls, "deposit button is outside bottom controls")
 assert(NativeReagentsAutoDeposit.parent == NativeReagentsBankFrame.controls, "auto-deposit is outside bottom controls")
+assert(NativeReagentsBankFrame.controls.points[1][5] == 4, "bottom controls were not moved inside the reagent page")
 
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_OPENED")
 assert(NativeReagentsBankTab.shown and NativeReagentsReagentTab.shown, "tabs are hidden at an open bank")
@@ -128,6 +160,17 @@ for index = 1, 28 do assert(not _G["BankFrameItem" .. index].shown, "stock bank 
 for index = 1, 7 do assert(not _G["BankFrameBag" .. index].shown, "stock bank bag leaked through") end
 assert(not itemLabel.shown and not bagLabel.shown and BankFrameTitleText.shown, "stock labels or banker title visibility is wrong")
 assert(NativeReagentsBankFrame.statusText.text == "No reagents stored", "empty state was not rendered")
+
+BankFrameItemButton_Update(BankFrameItem1)
+UpdateBagSlotStatus()
+BankFrame_OnShow()
+BankFrame_OnEvent(BankFrame, "PLAYERBANKSLOTS_CHANGED")
+itemLabel:Show(); bagLabel:Show()
+lifecycle.scripts.OnEvent(lifecycle, "BAG_UPDATE")
+for index = 1, 28 do assert(not _G["BankFrameItem" .. index].shown, "stock bank refresh restored item slot " .. index) end
+for index = 1, 7 do assert(not _G["BankFrameBag" .. index].shown, "stock bank refresh restored bag slot " .. index) end
+assert(not BankFramePurchaseInfo.shown and not BankFrameMoneyFrame.shown, "stock bank controls escaped reagent page")
+assert(not itemLabel.shown and not bagLabel.shown, "stock bank labels escaped reagent page")
 
 for id = 1, 43 do NativeReagents.items[id] = id * 100 end
 Fire("ITEMS_UPDATED")
@@ -141,6 +184,15 @@ assert(not NativeReagentsBankFrame.shown and NativeReagentsBankTab.selected, "Ba
 for index = 1, 28 do assert(_G["BankFrameItem" .. index].shown, "stock bank slot was not restored") end
 for index = 1, 7 do assert(_G["BankFrameBag" .. index].shown, "stock bank bag was not restored") end
 assert(itemLabel.shown and bagLabel.shown and BankFrameTitleText.shown, "stock labels were not restored")
+assert(BankFramePurchaseInfo.shown and BankFrameMoneyFrame.shown, "stock bank controls were not restored")
+
+for iteration = 1, 3 do
+    NativeReagentsReagentTab.scripts.OnClick()
+    BankFrame_OnShow()
+    assert(not BankFrameItem1.shown and not BankFrameBag1.shown, "stock content escaped on repeated switch " .. iteration)
+    NativeReagentsBankTab.scripts.OnClick()
+    assert(BankFrameItem1.shown and BankFrameBag1.shown, "stock content failed to restore on repeated switch " .. iteration)
+end
 
 NativeReagentsReagentTab.scripts.OnClick()
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_CLOSED")
@@ -148,4 +200,4 @@ assert(not NativeReagentsBankTab.shown and not NativeReagentsReagentTab.shown, "
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_OPENED")
 assert(NativeReagentsBankTab.selected and not NativeReagentsBankFrame.shown, "reopened bank did not default to Bank")
 
-print("PASS Lua bank UI construction, empty/populated paging, switching, close/reopen restoration")
+print("PASS Lua bank UI construction, paging, refresh guards, repeated switching, close/reopen restoration")

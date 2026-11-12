@@ -5,44 +5,82 @@ local columns, perPage = 7, 42
 -- gaps.  Keeping the native pitch is important because ItemButtonTemplate's
 -- 64x64 UI-Quickslot2 normal texture extends outside the button itself.
 local slotWidth, slotHeight, columnPitch, rowPitch = 37, 37, 49, 44
-local stockState = nil
+local stockFrames, stockLabels, stockState = {}, {}, nil
+local reagentsSelected = false
 
 local quality = {
     [0] = {0.62, 0.62, 0.62}, [1] = {1, 1, 1}, [2] = {0.12, 1, 0},
     [3] = {0, 0.44, 0.87}, [4] = {0.64, 0.21, 0.93}, [5] = {1, 0.5, 0}
 }
 
-local function StockFrames()
-    local frames = {}
-    local function Add(frame) if frame then table.insert(frames, frame) end end
+local function FindStockFrames()
+    local function Add(frame) if frame then table.insert(stockFrames, frame) end end
     for i = 1, (NUM_BANKGENERIC_SLOTS or 28) do Add(_G["BankFrameItem" .. i]) end
     for i = 1, (NUM_BANKBAGSLOTS or 7) do Add(_G["BankFrameBag" .. i]) end
-    Add(BankFrameMoneyFrame)
+    -- PurchaseButton and DetailMoneyFrame are descendants of PurchaseInfo in
+    -- Blizzard's BankFrame.xml, but include them explicitly so a direct Show()
+    -- cannot escape the selected page if custom FrameXML has reparented them.
     Add(BankFramePurchaseInfo)
     Add(BankFramePurchaseButton)
     Add(BankFrameDetailMoneyFrame)
+    Add(BankFrameMoneyFrame)
+
+    -- The stock "Item Slots" and "Bag Slots" labels are anonymous regions on
+    -- BankFrame.  BankFrameTitleText is named and must remain visible.
     local regions = {BankFrame:GetRegions()}
     for _, region in ipairs(regions) do
-        if region ~= BankFrameTitleText and region:GetObjectType() == "FontString" then Add(region) end
+        if region ~= BankFrameTitleText and region:GetObjectType() == "FontString" then
+            table.insert(stockLabels, region)
+        end
     end
-    return frames
+end
+
+local function EnforceStockHidden()
+    if not reagentsSelected then return end
+    for _, frame in ipairs(stockFrames) do frame:Hide() end
+    for _, region in ipairs(stockLabels) do region:Hide() end
 end
 
 local function HideStock()
-    if stockState then return end
-    stockState = {}
-    for _, frame in ipairs(StockFrames()) do
-        stockState[frame] = frame:IsShown() and true or false
-        frame:Hide()
+    if not stockState then
+        stockState = {}
+        for _, frame in ipairs(stockFrames) do stockState[frame] = frame:IsShown() and true or false end
+        for _, region in ipairs(stockLabels) do stockState[region] = region:IsShown() and true or false end
     end
+    EnforceStockHidden()
+end
+
+local function InstallStockVisibilityGuards()
+    for _, frame in ipairs(stockFrames) do
+        frame:HookScript("OnShow", function(self)
+            if reagentsSelected then self:Hide() end
+        end)
+    end
+    local function EnforceAfterStockUpdate() EnforceStockHidden() end
+    if BankFrameItemButton_Update then hooksecurefunc("BankFrameItemButton_Update", EnforceAfterStockUpdate) end
+    if UpdateBagSlotStatus then hooksecurefunc("UpdateBagSlotStatus", EnforceAfterStockUpdate) end
+    if BankFrame_OnShow then hooksecurefunc("BankFrame_OnShow", EnforceAfterStockUpdate) end
+    if BankFrame_OnEvent then hooksecurefunc("BankFrame_OnEvent", EnforceAfterStockUpdate) end
 end
 
 local function RestoreStock()
+    reagentsSelected = false
     if not stockState then return end
     for frame, shown in pairs(stockState) do
         if shown then frame:Show() else frame:Hide() end
     end
     stockState = nil
+end
+
+local function HideStockForPage()
+    reagentsSelected = true
+    HideStock()
+end
+
+local function RefreshStockVisibility()
+    if reagentsSelected then
+        EnforceStockHidden()
+    end
 end
 
 local function SortedItems()
@@ -134,7 +172,7 @@ StaticPopupDialogs["NATIVE_REAGENTS_WITHDRAW"] = {
 
 local function ShowReagents()
     if not view or (NR.GetPresentation() and NR.GetPresentation() ~= view) then return end
-    HideStock()
+    HideStockForPage()
     view:Show()
     page = 0
     SetTab(2)
@@ -151,6 +189,9 @@ end
 
 local function Build()
     if view or not BankFrame then return end
+
+    FindStockFrames()
+    InstallStockVisibilityGuards()
 
     -- Publish the frame and button arrays only after every item button exists. If a
     -- previous interrupted load left named frames behind, reuse them exactly once.
@@ -170,7 +211,10 @@ local function Build()
 
     local bankTab = _G.NativeReagentsBankTab or CreateFrame("Button", "NativeReagentsBankTab", BankFrame, "CharacterFrameTabButtonTemplate")
     bankTab:ClearAllPoints()
-    bankTab:SetPoint("TOPLEFT", BankFrame, "BOTTOMLEFT", 30, 4)
+    -- BankFrame is 512 high, but its visible artwork ends about 70 UI units
+    -- above its geometric bottom.  Anchor to that artwork edge, not the
+    -- transparent tail represented by BankFrame's bottom.
+    bankTab:SetPoint("TOPLEFT", BankFrame, "BOTTOMLEFT", 30, 70)
     bankTab:SetFrameLevel(BankFrame:GetFrameLevel() + 9)
     bankTab:SetText("Bank")
     bankTab:SetScript("OnClick", ShowBank)
@@ -187,7 +231,7 @@ local function Build()
     local controls = candidate.controls or CreateFrame("Frame", nil, candidate)
     candidate.controls = controls
     controls:ClearAllPoints()
-    controls:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 0)
+    controls:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 4)
     controls:SetSize(360, 44)
     controls:SetFrameLevel(candidate:GetFrameLevel() + 1)
     local divider = controls.divider or controls:CreateTexture(nil, "ARTWORK")
@@ -202,14 +246,14 @@ local function Build()
     deposit:SetParent(controls)
     deposit:SetSize(145, 24)
     deposit:ClearAllPoints()
-    deposit:SetPoint("BOTTOMRIGHT", controls, "BOTTOMRIGHT", -16, 10)
+    deposit:SetPoint("BOTTOMRIGHT", controls, "BOTTOMRIGHT", -16, 8)
     deposit:SetText("Deposit Reagents")
     deposit:SetScript("OnClick", NR.DepositAll)
 
     local auto = _G.NativeReagentsAutoDeposit or CreateFrame("CheckButton", "NativeReagentsAutoDeposit", controls, "UICheckButtonTemplate")
     auto:SetParent(controls)
     auto:ClearAllPoints()
-    auto:SetPoint("BOTTOMLEFT", controls, "BOTTOMLEFT", 14, 8)
+    auto:SetPoint("BOTTOMLEFT", controls, "BOTTOMLEFT", 14, 6)
     local autoText = auto.text or auto:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     auto.text = autoText
     autoText:ClearAllPoints()
@@ -225,21 +269,21 @@ local function Build()
     local previous = _G.NativeReagentsPrevious or CreateFrame("Button", "NativeReagentsPrevious", candidate, "UIPanelButtonTemplate")
     previous:SetSize(90, 22)
     previous:ClearAllPoints()
-    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 58)
+    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 60)
     previous:SetText("Previous")
     previous:SetScript("OnClick", function() page = math.max(0, page - 1); Refresh() end)
 
     local nextButton = _G.NativeReagentsNext or CreateFrame("Button", "NativeReagentsNext", candidate, "UIPanelButtonTemplate")
     nextButton:SetSize(90, 22)
     nextButton:ClearAllPoints()
-    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 58)
+    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 60)
     nextButton:SetText("Next")
     nextButton:SetScript("OnClick", function() page = page + 1; Refresh() end)
 
     local pageText = candidate.pageText or candidate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     candidate.pageText = pageText
     pageText:ClearAllPoints()
-    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 63)
+    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 65)
 
     local statusText = candidate.statusText or candidate:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     candidate.statusText = statusText
@@ -325,6 +369,12 @@ local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
 events:RegisterEvent("BANKFRAME_OPENED")
 events:RegisterEvent("BANKFRAME_CLOSED")
+events:RegisterEvent("ITEM_LOCK_CHANGED")
+events:RegisterEvent("PLAYERBANKSLOTS_CHANGED")
+events:RegisterEvent("PLAYERBANKBAGSLOTS_CHANGED")
+events:RegisterEvent("PLAYER_MONEY")
+events:RegisterEvent("BAG_UPDATE")
+events:RegisterEvent("BAG_UPDATE_COOLDOWN")
 events:SetScript("OnEvent", function(_, event)
     Build()
     if event == "BANKFRAME_OPENED" then
@@ -337,5 +387,7 @@ events:SetScript("OnEvent", function(_, event)
     elseif event == "BANKFRAME_CLOSED" then
         ShowBank()
         if view then view.bankTab:Hide(); view.reagentTab:Hide() end
+    else
+        RefreshStockVisibility()
     end
 end)

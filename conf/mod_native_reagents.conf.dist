@@ -1,0 +1,20 @@
+[worldserver]
+
+# Master switch.
+NativeReagents.Enable = 1
+# Extra server logging (reserved for diagnostics).
+NativeReagents.Debug = 0
+# Allow per-character automatic deposits at bankers.
+NativeReagents.AutoDeposit.Enable = 1
+# 0 means unlimited. Limits are checked atomically for an entire deposit.
+NativeReagents.Storage.MaxTypes = 0
+NativeReagents.Storage.MaxQuantityPerItem = 0
+# Remote crafting uses temporary physical reagents. It is disabled for initial
+# PTR banking validation because no module hook can make spell-effect persistence
+# and a database failure one atomic core operation. Enable only for isolated testing.
+NativeReagents.RemoteCraft.Enable = 0
+NativeReagents.RemoteCraft.TransactionTimeoutSeconds = 30
+# Maximum idle age of an explicitly opened banker session.
+NativeReagents.BankerSession.TimeoutSeconds = 300
+# Enable the injected stock-bank presentation.
+NativeReagents.UI.Enable = 1

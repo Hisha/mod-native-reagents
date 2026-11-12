@@ -1,0 +1,10 @@
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsManager.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsManager.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsProtocol.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsProtocol.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsSafety.h")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/NativeReagentsScripts.cpp")
+AC_ADD_SCRIPT("${CMAKE_CURRENT_LIST_DIR}/src/mod_native_reagents_loader.cpp")
+
+AC_ADD_CONFIG_FILE("${CMAKE_CURRENT_LIST_DIR}/conf/mod_native_reagents.conf.dist")
+message("-- MOD NATIVE REAGENTS CONFIGURED --")

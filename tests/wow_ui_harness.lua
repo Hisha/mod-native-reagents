@@ -17,6 +17,7 @@ function Frame:EnableMouseWheel(enabled) self.mouseWheel = enabled end
 function Frame:CreateTexture() return Frame:new(nil, self) end
 function Frame:CreateFontString() return Frame:new(nil, self) end
 function Frame:SetTexture(texture) self.texture = texture end
+function Frame:GetNormalTexture() return self.normalTexture end
 function Frame:SetTexCoord(...) self.texCoord = {...} end
 function Frame:SetBlendMode(mode) self.blendMode = mode end
 function Frame:SetVertexColor(...) self.vertexColor = {...} end
@@ -34,6 +35,7 @@ function Frame:Disable() self.enabled = false end
 function Frame:SetChecked(value) self.checked = value end
 function Frame:GetChecked() return self.checked end
 function Frame:GetParent() return self.parent end
+function Frame:SetParent(parent) self.parent = parent end
 function Frame:GetObjectType() return self.objectType or "Frame" end
 function Frame:GetRegions() return (table.unpack or unpack)(self.regions or {}) end
 function Frame:HighlightText() self.highlighted = true end
@@ -41,6 +43,7 @@ function Frame:HighlightText() self.highlighted = true end
 local anonymousFrames = {}
 function CreateFrame(_, name, parent)
     local frame = Frame:new(name, parent)
+    frame.normalTexture = Frame:new(nil, frame)
     if not name then table.insert(anonymousFrames, frame) end
     return frame
 end
@@ -101,8 +104,19 @@ assert(lifecycle and lifecycle.scripts.OnEvent, "bank lifecycle frame was not in
 lifecycle.scripts.OnEvent(lifecycle, "PLAYER_LOGIN")
 
 for slot = 1, 42 do assert(_G["NativeReagentsItem" .. slot], "missing reagent item button " .. slot) end
-assert(NativeReagentsBankTab.points[1][1] == "BOTTOMLEFT", "Bank tab is not anchored below BankFrame")
+assert(NativeReagentsBankTab.points[1][1] == "TOPLEFT", "Bank tab is not attached below BankFrame")
 assert(NativeReagentsBankTab.points[1][2] == BankFrame, "Bank tab lost its BankFrame anchor")
+assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached to the bottom border")
+for slot = 1, 42 do
+    local button = _G["NativeReagentsItem" .. slot]
+    assert(button.width == 37 and button.height == 37, "reagent slot dimensions changed")
+    assert(button.normalTexture.texture == "Interface\\Buttons\\UI-Quickslot2", "reagent slot lost stock artwork")
+end
+assert(NativeReagentsItem2.points[1][4] - NativeReagentsItem1.points[1][4] == 49, "horizontal slot pitch is not stock geometry")
+assert(NativeReagentsItem8.points[1][5] - NativeReagentsItem1.points[1][5] == -44, "vertical slot pitch is not stock geometry")
+assert(NativeReagentsPrevious.points[1][5] > NativeReagentsDepositButton.points[1][5], "pagination overlaps deposit controls")
+assert(NativeReagentsDepositButton.parent == NativeReagentsBankFrame.controls, "deposit button is outside bottom controls")
+assert(NativeReagentsAutoDeposit.parent == NativeReagentsBankFrame.controls, "auto-deposit is outside bottom controls")
 
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_OPENED")
 assert(NativeReagentsBankTab.shown and NativeReagentsReagentTab.shown, "tabs are hidden at an open bank")

@@ -27,8 +27,12 @@ def main() -> None:
     require("DROP TABLE" not in sql.upper() and "ALTER TABLE" not in sql.upper(), "base SQL must be non-destructive")
     require("character_native_reagent_operations" in journal_sql and "FOREIGN KEY" in journal_sql, "safety journal schema missing")
     manager = (ROOT / "src/NativeReagentsManager.cpp").read_text()
-    require(manager.count("SaveToDB(transaction, false, false)") >= 3, "inventory writes must join DB transactions")
-    require(manager.count("DirectCommitTransaction(transaction)") >= 4, "critical commits must complete before response")
+    require(manager.count("SaveInventoryAndGoldToDB(transaction)") == 5,
+            "all inventory writes must join their reagent transaction")
+    require("AsyncCommitTransaction(transaction)" in manager and "callback.m_future.get()" in manager,
+            "inventory transactions must execute on an async connection and wait for the real result")
+    require("SaveToDB(transaction, false, false)" not in manager,
+            "full character saves append unrelated async-only statements")
     require("GetOperationStatus" in manager and "OperationGuard" in manager, "verified serialized operations missing")
     require("SELECT 1 AS sentinel" in manager and "OperationStatus::Unavailable" in manager,
             "commit verification must distinguish an absent marker from an unavailable database")

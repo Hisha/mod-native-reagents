@@ -1,6 +1,10 @@
 local NR = NativeReagents
 local view, buttons, page = nil, {}, 0
 local columns, perPage = 7, 42
+-- Stock BankFrame item buttons are 37x37, with 12 horizontal and 7 vertical
+-- gaps.  Keeping the native pitch is important because ItemButtonTemplate's
+-- 64x64 UI-Quickslot2 normal texture extends outside the button itself.
+local slotWidth, slotHeight, columnPitch, rowPitch = 37, 37, 49, 44
 local stockState = nil
 
 local quality = {
@@ -166,7 +170,7 @@ local function Build()
 
     local bankTab = _G.NativeReagentsBankTab or CreateFrame("Button", "NativeReagentsBankTab", BankFrame, "CharacterFrameTabButtonTemplate")
     bankTab:ClearAllPoints()
-    bankTab:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 30, 38)
+    bankTab:SetPoint("TOPLEFT", BankFrame, "BOTTOMLEFT", 30, 4)
     bankTab:SetFrameLevel(BankFrame:GetFrameLevel() + 9)
     bankTab:SetText("Bank")
     bankTab:SetScript("OnClick", ShowBank)
@@ -180,16 +184,32 @@ local function Build()
     reagentTab:SetScript("OnClick", ShowReagents)
     PanelTemplates_TabResize(reagentTab, 0)
 
-    local deposit = _G.NativeReagentsDepositButton or CreateFrame("Button", "NativeReagentsDepositButton", candidate, "UIPanelButtonTemplate")
+    local controls = candidate.controls or CreateFrame("Frame", nil, candidate)
+    candidate.controls = controls
+    controls:ClearAllPoints()
+    controls:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 0)
+    controls:SetSize(360, 44)
+    controls:SetFrameLevel(candidate:GetFrameLevel() + 1)
+    local divider = controls.divider or controls:CreateTexture(nil, "ARTWORK")
+    controls.divider = divider
+    divider:ClearAllPoints()
+    divider:SetPoint("TOP", controls, "TOP", 0, 0)
+    divider:SetSize(346, 1)
+    divider:SetTexture("Interface\\Buttons\\WHITE8X8")
+    divider:SetVertexColor(0.45, 0.36, 0.16)
+
+    local deposit = _G.NativeReagentsDepositButton or CreateFrame("Button", "NativeReagentsDepositButton", controls, "UIPanelButtonTemplate")
+    deposit:SetParent(controls)
     deposit:SetSize(145, 24)
     deposit:ClearAllPoints()
-    deposit:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -13, 14)
+    deposit:SetPoint("BOTTOMRIGHT", controls, "BOTTOMRIGHT", -16, 10)
     deposit:SetText("Deposit Reagents")
     deposit:SetScript("OnClick", NR.DepositAll)
 
-    local auto = _G.NativeReagentsAutoDeposit or CreateFrame("CheckButton", "NativeReagentsAutoDeposit", candidate, "UICheckButtonTemplate")
+    local auto = _G.NativeReagentsAutoDeposit or CreateFrame("CheckButton", "NativeReagentsAutoDeposit", controls, "UICheckButtonTemplate")
+    auto:SetParent(controls)
     auto:ClearAllPoints()
-    auto:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 12, 12)
+    auto:SetPoint("BOTTOMLEFT", controls, "BOTTOMLEFT", 14, 8)
     local autoText = auto.text or auto:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     auto.text = autoText
     autoText:ClearAllPoints()
@@ -205,26 +225,26 @@ local function Build()
     local previous = _G.NativeReagentsPrevious or CreateFrame("Button", "NativeReagentsPrevious", candidate, "UIPanelButtonTemplate")
     previous:SetSize(90, 22)
     previous:ClearAllPoints()
-    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 51)
+    previous:SetPoint("BOTTOMLEFT", candidate, "BOTTOMLEFT", 20, 58)
     previous:SetText("Previous")
     previous:SetScript("OnClick", function() page = math.max(0, page - 1); Refresh() end)
 
     local nextButton = _G.NativeReagentsNext or CreateFrame("Button", "NativeReagentsNext", candidate, "UIPanelButtonTemplate")
     nextButton:SetSize(90, 22)
     nextButton:ClearAllPoints()
-    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 51)
+    nextButton:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", -20, 58)
     nextButton:SetText("Next")
     nextButton:SetScript("OnClick", function() page = page + 1; Refresh() end)
 
     local pageText = candidate.pageText or candidate:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     candidate.pageText = pageText
     pageText:ClearAllPoints()
-    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 56)
+    pageText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 63)
 
     local statusText = candidate.statusText or candidate:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     candidate.statusText = statusText
     statusText:ClearAllPoints()
-    statusText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 83)
+    statusText:SetPoint("BOTTOM", candidate, "BOTTOM", 0, 91)
 
     candidate:SetScript("OnMouseWheel", function(_, delta)
         if NR.IsReady() then page = math.max(0, page - delta); Refresh() end
@@ -235,7 +255,16 @@ local function Build()
         local button = _G[name] or CreateFrame("Button", name, candidate, "ItemButtonTemplate")
         local column, row = (slot - 1) % columns, math.floor((slot - 1) / columns)
         button:ClearAllPoints()
-        button:SetPoint("TOPLEFT", candidate, "TOPLEFT", 20 + column * 46, -17 - row * 43)
+        button:SetSize(slotWidth, slotHeight)
+        button:SetPoint("TOPLEFT", candidate, "TOPLEFT", 10 + column * columnPitch, -16 - row * rowPitch)
+        button:SetFrameLevel(candidate:GetFrameLevel() + 2)
+        local normal = button:GetNormalTexture()
+        if normal then
+            normal:ClearAllPoints()
+            normal:SetPoint("CENTER", button, "CENTER", 0, -1)
+            normal:SetSize(64, 64)
+            normal:SetTexture("Interface\\Buttons\\UI-Quickslot2")
+        end
         button:SetID(slot)
         button:RegisterForClicks("LeftButtonUp", "RightButtonUp")
         if not button.border then

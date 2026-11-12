@@ -9,5 +9,10 @@ FrameXML lifecycle covering 42-button initialization, empty/populated pagination
 exclusive pages, stock-control restoration, and close/reopen behavior. `pkg-config lua` and
 the corresponding development headers are therefore required to run the full suite.
 
+`prepared_statement_audit.py --acore-source /path/to/azerothcore-wotlk` dynamically maps the
+statement enum from the exact core revision and checks every inventory statement used by the
+module. `mysql_integration.py` exercises the balance and journal boundaries against a real,
+isolated MySQL schema; it refuses a database name that does not end in `_test`.
+
 It is deliberately not a substitute for the live AzerothCore and patched-client matrix in
 `docs/LIVE_TEST_PLAN.md`.

@@ -84,6 +84,17 @@ private:
 
 enum class OperationStatus { Present, Absent, Unavailable };
 
+// Player inventory persistence is built from core prepared statements registered
+// for CONNECTION_ASYNC.  DirectCommitTransaction leases a CONNECTION_SYNCH
+// connection, where those statements do not exist.  Submit to the worker pool and
+// wait for its result so the world thread still observes a definite transaction
+// boundary before it permits another save or sends a successful response.
+void CommitInventoryTransaction(CharacterDatabaseTransaction transaction)
+{
+    TransactionCallback callback = CharacterDatabase.AsyncCommitTransaction(transaction);
+    callback.m_future.get();
+}
+
 OperationStatus GetOperationStatus(uint32 guid, uint64 operationId, char const* kind,
     char const* state, uint64* resultAmount = nullptr)
 {
@@ -323,8 +334,8 @@ uint64 Manager::DepositAll(Player* player, std::string& error, uint64 operationI
         "INSERT INTO character_native_reagent_operations"
         "(guid,operation_id,kind,state,result_amount) VALUES({}, {}, 'DEPOSIT', 'COMPLETED', {})",
         Guid(player), operationId, total);
-    player->SaveToDB(transaction, false, false);
-    CharacterDatabase.DirectCommitTransaction(transaction);
+    player->SaveInventoryAndGoldToDB(transaction);
+    CommitInventoryTransaction(transaction);
     OperationStatus committed = GetOperationStatus(Guid(player), operationId, "DEPOSIT", "COMPLETED");
     Safety::CommitDecision decision = Safety::ClassifyCommitVerification(
         committed != OperationStatus::Unavailable, committed == OperationStatus::Present);
@@ -334,7 +345,7 @@ uint64 Manager::DepositAll(Player* player, std::string& error, uint64 operationI
         FailStopAmbiguousCommit("deposit", Guid(player), operationId);
 
     // The database transaction rolled back. No other player action can interleave
-    // with DirectCommitTransaction on the world thread, so restoring by entry returns
+    // while the world thread waits for the worker, so restoring by entry returns
     // the live inventory to the same totals that remain persistent in the database.
     bool restored = true;
     for (auto const& [entry, amount] : additions)
@@ -417,8 +428,8 @@ bool Manager::Withdraw(Player* player, uint32 entry, uint32 amount, std::string&
         "(guid,operation_id,kind,state,item_entry,amount,result_amount) "
         "VALUES({}, {}, 'WITHDRAW', 'COMPLETED', {}, {}, {})",
         Guid(player), operationId, entry, amount, amount);
-    player->SaveToDB(transaction, false, false);
-    CharacterDatabase.DirectCommitTransaction(transaction);
+    player->SaveInventoryAndGoldToDB(transaction);
+    CommitInventoryTransaction(transaction);
     OperationStatus committed = GetOperationStatus(Guid(player), operationId, "WITHDRAW", "COMPLETED");
     Safety::CommitDecision decision = Safety::ClassifyCommitVerification(
         committed != OperationStatus::Unavailable, committed == OperationStatus::Present);
@@ -426,7 +437,7 @@ bool Manager::Withdraw(Player* player, uint32 entry, uint32 amount, std::string&
     {
         if (decision == Safety::CommitDecision::FailStop)
             FailStopAmbiguousCommit("withdrawal", Guid(player), operationId);
-        // No world-thread action can interleave with the direct commit, so returning
+        // No world-thread action can interleave with the blocking worker commit, so returning
         // the total to its pre-operation baseline is deterministic.
         player->DestroyItemCount(entry, amount, true);
         error = "The reagent withdrawal could not be committed; no persistent items were moved.";
@@ -752,8 +763,8 @@ bool Manager::BeginBorrow(Player* player, Spell* spell, SpellCastResult& result)
             "(guid,operation_id,item_entry,amount,baseline) VALUES({}, {}, {}, {}, {})",
             guid, operationId, row.entry, row.amount, row.baseline);
     }
-    player->SaveToDB(transaction, false, false);
-    CharacterDatabase.DirectCommitTransaction(transaction);
+    player->SaveInventoryAndGoldToDB(transaction);
+    CommitInventoryTransaction(transaction);
     OperationStatus borrowedState = GetOperationStatus(guid, operationId, "CRAFT", "BORROWED");
     Safety::CommitDecision decision = Safety::ClassifyCommitVerification(
         borrowedState != OperationStatus::Unavailable, borrowedState == OperationStatus::Present);
@@ -813,9 +824,9 @@ void Manager::RollbackBorrow(Player* player)
         "UPDATE character_native_reagent_operations SET state='ROLLEDBACK' "
         "WHERE guid={} AND operation_id={} AND state='BORROWED'",
         Guid(player), found->second.operationId);
-    player->SaveToDB(transaction, false, false);
+    player->SaveInventoryAndGoldToDB(transaction);
     uint64 operationId = found->second.operationId;
-    CharacterDatabase.DirectCommitTransaction(transaction);
+    CommitInventoryTransaction(transaction);
     OperationStatus rollbackState = GetOperationStatus(Guid(player), operationId, "CRAFT", "ROLLEDBACK");
     Safety::CommitDecision decision = Safety::ClassifyCommitVerification(
         rollbackState != OperationStatus::Unavailable, rollbackState == OperationStatus::Present);
@@ -848,9 +859,9 @@ void Manager::OnSpellCast(Player* player, SpellInfo const* info)
         "UPDATE character_native_reagent_operations SET state='COMPLETED' "
         "WHERE guid={} AND operation_id={} AND state='BORROWED'",
         Guid(player), found->second.operationId);
-    player->SaveToDB(transaction, false, false);
+    player->SaveInventoryAndGoldToDB(transaction);
     uint64 operationId = found->second.operationId;
-    CharacterDatabase.DirectCommitTransaction(transaction);
+    CommitInventoryTransaction(transaction);
     Borrows.erase(found); // Never refund after the core has consumed reagents.
     OperationStatus completionState = GetOperationStatus(Guid(player), operationId, "CRAFT", "COMPLETED");
     Safety::CommitDecision decision = Safety::ClassifyCommitVerification(

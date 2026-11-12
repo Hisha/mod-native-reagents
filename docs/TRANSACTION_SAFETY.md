@@ -7,16 +7,17 @@ first serialization layer; `OperationGuard` explicitly rejects accidental re-ent
 
 The critical transaction contains:
 
-1. the inventory state produced by `Player::SaveToDB(transaction, false, false)`;
+1. the inventory state produced by `Player::SaveInventoryAndGoldToDB(transaction)`;
 2. absolute reagent-storage balances (not unchecked conditional decrements); and
 3. a unique `COMPLETED` operation marker.
 
-The transaction uses `DirectCommitTransaction`, then the marker is synchronously read back.
-The verification query uses a sentinel row, so it distinguishes a definitely absent marker
-from a query that could not execute. Only a verified marker produces a success response. When
-the query proves the marker absent, the live inventory mutation is reversed before control
-returns. Because the direct call does not yield the world thread, player actions and logout
-cannot interleave with mutation, commit, verification, or reversal.
+The transaction uses `AsyncCommitTransaction` and waits on its worker result, then the marker
+is synchronously read back. This is required because AzerothCore registers inventory prepared
+statements for asynchronous connections; `DirectCommitTransaction` leases a synchronous
+connection where those statements are unavailable. The verification query uses a sentinel
+row, so it distinguishes a definitely absent marker from a query that could not execute. Only
+a verified marker produces success. When the marker is definitely absent, the live mutation
+is reversed. The blocked world thread prevents player actions and logout from interleaving.
 
 If the connection is lost during COMMIT and the verification query is also unavailable, the
 commit outcome is unknowable: reversing or later saving either in-memory state could choose the
@@ -25,11 +26,10 @@ database transaction itself contains both inventory and storage, so crash recove
 either the complete old state or the complete new state. This deliberately trades realm
 availability for conservation in the rare ambiguous-COMMIT case.
 
-This short blocking operation is a deliberate exception to the normal asynchronous database
-preference. `AsyncCommitTransaction` exposes eventual success through a session callback, but
-the character could disconnect and be saved independently while an inventory mutation was
-unconfirmed. The core does not expose affected-row results for individual statements inside
-a transaction. Absolute balances plus the single-writer rule avoid that unsupported case.
+This short blocking wait is deliberate. A later session callback would allow the character to
+disconnect and be saved independently while an inventory mutation was unconfirmed. The core
+does not expose affected-row results for individual statements inside a transaction. Absolute
+balances plus the single-writer rule avoid that unsupported case.
 
 The marker also makes recent successful request IDs idempotent across duplicate packets and
 reconnects. Records older than 30 days are pruned. A database outage detected before mutation
@@ -54,6 +54,6 @@ or NPC unavailability invalidates the session. Targeting a banker is insufficien
 
 ## Shutdown and logout
 
-Direct critical transactions finish or fail before the world thread proceeds to logout or
-shutdown handling. There is no unconfirmed asynchronous inventory transaction to strand.
+Critical worker transactions finish or fail before the world thread proceeds to logout or
+shutdown handling. There is no unconfirmed inventory transaction to strand.
 Committed database state contains both sides; failed state contains neither side.

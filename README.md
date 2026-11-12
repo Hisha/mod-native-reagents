@@ -105,12 +105,12 @@ confirm that existing server session. It cannot create authority. The session is
 bank close, range/NPC failure, timeout, or logout. `NativeReagents.Debug=1` logs the operation,
 authorization outcome, and precise reason without adding normal-gameplay log noise.
 
-Inventory changes use `Player::SaveToDB(CharacterDatabaseTransaction, ...)` in the same
-characters-database transaction as absolute storage balances and an operation-journal marker.
-Critical transactions use the supported direct commit path and read the marker back before
-success is reported. This short world-thread block is intentional: the asynchronous API
-reports transaction success later and cannot safely prevent logout from independently saving
-an unconfirmed inventory mutation. Per-character guards reject overlapping operations.
+Inventory changes use `Player::SaveInventoryAndGoldToDB(CharacterDatabaseTransaction)` in the
+same characters-database transaction as absolute storage balances and an operation-journal
+marker. Core inventory prepared statements are registered for asynchronous connections, so
+critical transactions are submitted with `AsyncCommitTransaction` and the world thread waits
+for its result before reading the marker back. This short block prevents logout from saving an
+unconfirmed mutation. Per-character guards reject overlapping operations.
 
 The journal makes successful deposit/withdraw request IDs durable and prevents replay while
 their retained records exist. Completed records older than 30 days are pruned at login. Do not

@@ -60,7 +60,7 @@ function NR.RegisterPresentation(presentation)
 end
 function NR.GetPresentation() return NR.presentation end
 
-local RefreshTradeSkill
+local RefreshTradeSkill, refreshingTradeSkill
 local function SetStatus(status)
     if NR.status == status then return end
     NR.status = status
@@ -130,9 +130,11 @@ local function UsesStored(index)
     end
 end
 RefreshTradeSkill = function()
+    if refreshingTradeSkill then return end
     if not TradeSkillFrame or not TradeSkillFrame:IsShown() then return end
     local index = TradeSkillFrame.selectedSkill or GetTradeSkillSelectionIndex()
     if not index or index <= 0 then return end
+    refreshingTradeSkill = true
     for reagent = 1, GetTradeSkillNumReagents(index) or 0 do
         local _, _, required, carried = GetTradeSkillReagentInfo(index, reagent)
         local id = ItemId(GetTradeSkillReagentItemLink(index, reagent))
@@ -178,6 +180,7 @@ RefreshTradeSkill = function()
             end
         end
     end
+    refreshingTradeSkill = false
 end
 local function InstallTradeSkill()
     if NR.tradeHooked or not TradeSkillFrame then return end

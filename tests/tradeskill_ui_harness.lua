@@ -1,4 +1,5 @@
 local sent, frames, hooks = {}, {}, {}
+local unpackValues = table.unpack or unpack
 
 local function Widget(shown)
     local widget = { shown = shown ~= false, enabled = true, text = "", width = 20, scripts = {}, events = {} }
@@ -24,7 +25,15 @@ function CreateFrame()
     table.insert(frames, frame)
     return frame
 end
-function hooksecurefunc(name, callback) hooks[name] = callback end
+function hooksecurefunc(name, callback)
+    local original = _G[name]
+    hooks[name] = callback
+    _G[name] = function(...)
+        local results = { original(...) }
+        callback(...)
+        return unpackValues(results)
+    end
+end
 function SendAddonMessage(prefix, payload, channel, target)
     table.insert(sent, { prefix=prefix, payload=payload, channel=channel, target=target })
 end
@@ -157,8 +166,20 @@ assert(TradeSkillSkill3Count.text == "[5]", "deposit sync did not refresh the re
 
 recipes[4].cooldown = 30
 TradeSkillFrame.selectedSkill = 4
-hooks.TradeSkillFrame_SetSelection(4)
+TradeSkillFrame_SetSelection(4)
 assert(TradeSkillSkill4Count.text == "" and TradeSkillFrame.numAvailable == 0,
     "recipe cooldown restriction was not preserved")
 
-print("PASS profession combined craftable counts and refresh behavior")
+-- A queried native API can synchronously cause Blizzard's hooked update path
+-- to run again.  Refreshing the list must not recursively re-enter itself.
+local stockGetTradeSkillInfo, infoCalls = GetTradeSkillInfo, 0
+GetTradeSkillInfo = function(index)
+    infoCalls = infoCalls + 1
+    assert(infoCalls < 100, "trade-skill refresh recursively re-entered")
+    TradeSkillFrame_Update()
+    return stockGetTradeSkillInfo(index)
+end
+TradeSkillFrame_Update()
+assert(infoCalls < 30, "nested trade-skill updates caused a refresh loop")
+
+print("PASS profession combined craftable counts, recursive hooks, and bounded refresh behavior")

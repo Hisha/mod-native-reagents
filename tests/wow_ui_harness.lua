@@ -164,7 +164,8 @@ assert(not _G.NativeReagentsItem36, "sixth reagent row was unexpectedly created"
 assert(NativeReagentsTabAnchor.points[1][1] == "BOTTOMLEFT", "tab anchor lost its BankFrame edge")
 assert(NativeReagentsTabAnchor.points[1][2] == BankFrame, "tab anchor lost BankFrame parent geometry")
 assert(NativeReagentsTabAnchor.points[1][3] == "BOTTOMLEFT", "tab anchor is not based on BankFrame bottom")
-assert(NativeReagentsTabAnchor.points[1][5] == 88, "tab anchor does not use the texture alpha boundary")
+assert(NativeReagentsTabAnchor.points[1][4] == 11, "tab anchor lost the stock horizontal inset")
+assert(NativeReagentsTabAnchor.points[1][5] == 92, "tab anchor is not flush with the bottom-border junction")
 assert(NativeReagentsBankTab.points[1][2] == NativeReagentsTabAnchor, "Bank tab is not attached to the visible-border anchor")
 assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached beneath the visible border")
 for slot = 1, 35 do
@@ -180,10 +181,14 @@ assert(NativeReagentsAutoDeposit.parent == NativeReagentsBankFrame.controls, "au
 assert(NativeReagentsBankFrame.controls.points[1][5] == 8, "bottom controls are not inset from the visible border")
 assert(NativeReagentsBankFrame.points[1][5] == -68 and NativeReagentsBankFrame.points[2][5] == 92,
     "reagent page is not bounded by the stock artwork interior")
-assert(NativeReagentsBankFrame.contentMask.texture[1] == 0.035 and NativeReagentsBankFrame.contentMask.texture[4] == 1,
-    "stock artwork mask is not an opaque solid texture")
-assert(#NativeReagentsBankFrame.contentMask.points == 2,
-    "content mask does not cover the complete reagent page")
+assert(#NativeReagentsBankFrame.backgroundTiles == 5, "stock bank background does not cover the reagent page")
+for index, tile in ipairs(NativeReagentsBankFrame.backgroundTiles) do
+    assert(tile.texture[1] == "Interface\\BankFrame\\UI-BankFrame", "background tile lost stock bank artwork")
+    assert(tile.width == 360 and tile.height == (index < 5 and 72 or 64),
+        "background tile changed the stock crop proportions")
+    assert(tile.texCoord[1] == 22 / 512 and tile.texCoord[2] == 382 / 512 and tile.texCoord[3] == 318 / 512,
+        "background tile changed the stock crop coordinates")
+end
 
 BankFrame:Show()
 lifecycle.scripts.OnEvent(lifecycle, "BANKFRAME_OPENED")

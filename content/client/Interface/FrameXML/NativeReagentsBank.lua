@@ -10,6 +10,13 @@ local slotWidth, slotHeight, columnPitch, rowPitch = 37, 37, 49, 44
 -- row 423, so its visible bottom is 88 UI units above the logical frame bottom.
 -- HitRectInsets bottom=70 is interaction geometry, not the artwork boundary.
 local artworkBottomInset = 88
+-- The decoration-free stone floor at x=22..382, y=318..390 in UI-BankFrame
+-- exactly matches the reagent surface width.  Repeating this native-size crop
+-- preserves the stock artwork without restoring its baked slot or bag outlines.
+local backgroundWidth, backgroundHeight, backgroundTileHeight = 360, 352, 72
+local backgroundSourceTop = 318
+local backgroundLeft, backgroundRight = 22 / 512, 382 / 512
+local backgroundTop = backgroundSourceTop / 512
 local stockObjects, stockLabels, stockState = {}, {}, nil
 local reagentsSelected = false
 local visibilityHookInstalled = false
@@ -129,7 +136,7 @@ function NR.DumpBankFrame()
     for i, object in ipairs(stockObjects) do DescribeObject("stock[" .. i .. "]", object) end
     DescribeObject("reagentPage", view)
     if view then
-        DescribeObject("contentMask", view.contentMask)
+        for i, tile in ipairs(view.backgroundTiles or {}) do DescribeObject("background[" .. i .. "]", tile) end
         DescribeObject("controls", view.controls)
         DescribeObject("bankTab", view.bankTab)
         DescribeObject("reagentTab", view.reagentTab)
@@ -284,21 +291,27 @@ local function Build()
     candidate:SetFrameLevel(BankFrame:GetFrameLevel() + 8)
     candidate:EnableMouseWheel(true)
 
-    -- UI-BankFrame is one monolithic stock texture: its slot outlines, bag bars,
-    -- outer border, and title surround cannot be hidden independently.  This
-    -- opaque content mask covers only the inventory interior while leaving the
-    -- shared portrait/title/close button and outer border exposed.  A solid
-    -- texture avoids the post-Wrath Bank-Background asset used by the old code.
-    local contentMask = candidate.contentMask or candidate:CreateTexture(nil, "BACKGROUND")
-    candidate.contentMask = contentMask
-    contentMask:ClearAllPoints()
-    contentMask:SetPoint("TOPLEFT", candidate, "TOPLEFT", 0, 0)
-    contentMask:SetPoint("BOTTOMRIGHT", candidate, "BOTTOMRIGHT", 0, 0)
-    contentMask:SetTexture(0.035, 0.03, 0.025, 1)
+    -- UI-BankFrame is monolithic, so use its undecorated lower stone floor as
+    -- native-size strips over the stock inventory interior.  The last strip is
+    -- cropped rather than scaled; all others retain the source's 360x72 aspect.
+    candidate.backgroundTiles = candidate.backgroundTiles or {}
+    for i = 1, math.ceil(backgroundHeight / backgroundTileHeight) do
+        local tile = candidate.backgroundTiles[i] or candidate:CreateTexture(nil, "BACKGROUND")
+        candidate.backgroundTiles[i] = tile
+        local offset = (i - 1) * backgroundTileHeight
+        local height = math.min(backgroundTileHeight, backgroundHeight - offset)
+        tile:ClearAllPoints()
+        tile:SetPoint("TOPLEFT", candidate, "TOPLEFT", 0, -offset)
+        tile:SetSize(backgroundWidth, height)
+        tile:SetTexture("Interface\\BankFrame\\UI-BankFrame")
+        tile:SetTexCoord(backgroundLeft, backgroundRight, backgroundTop, (backgroundSourceTop + height) / 512)
+    end
 
     local tabAnchor = _G.NativeReagentsTabAnchor or CreateFrame("Frame", "NativeReagentsTabAnchor", BankFrame)
     tabAnchor:ClearAllPoints()
-    tabAnchor:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 30, artworkBottomInset)
+    -- Match the reagent surface's bottom-border junction.  Keeping the anchor
+    -- and both tab parents on BankFrame avoids scale or page-switch drift.
+    tabAnchor:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 11, artworkBottomInset + 4)
     tabAnchor:SetSize(1, 1)
     local bankTab = _G.NativeReagentsBankTab or CreateFrame("Button", "NativeReagentsBankTab", BankFrame, "CharacterFrameTabButtonTemplate")
     bankTab:ClearAllPoints()

@@ -62,11 +62,20 @@ The monolithic stock texture remains present so its shared outer artwork is pres
 its inventory interior is covered. Bank mode hides that surface and restores the exact prior
 visibility of the stock controls and labels before asking Blizzard to refresh their state.
 
-The external tab anchor is `BankFrame BOTTOMLEFT + (30, 88)`. The 88 is not a screenshot-tuned
-offset: it is the measured alpha boundary of the stock 512-by-512 bank texture. The old 70-unit
-anchor used the hit rectangle and therefore placed the tabs 18 units below the visible border.
-`CharacterFrameTabButtonTemplate` supplies the native 32-unit tab artwork;
-its selected left texture intentionally extends five units above the button anchor.
+The reagent surface covers the stock inventory decorations with five native-scale crops from
+the undecorated 360-by-72 stone floor at texture pixels `(22, 318)` through `(382, 390)` in
+`UI-BankFrame`. Four strips use the complete crop; the last uses its first 64 rows. This keeps
+the original bank stone artwork at a 1:1 aspect without restoring the sheet's baked item slots,
+bag slots, or money bar.
+
+The external tab anchor is `BankFrame BOTTOMLEFT + (11, 92)`: the stock 11-unit horizontal tab
+inset, plus the texture's measured 88-unit alpha inset and the reagent surface's four-unit
+border inset. This puts the tab frame's top edge on the same bottom-border junction instead of
+leaving a gap. Both tabs remain children
+of `BankFrame`, and the second tab remains horizontally attached to the first, so scale and page
+switches cannot change their relationship. `CharacterFrameTabButtonTemplate` supplies the native
+32-unit tab artwork; its selected left texture intentionally extends five units above the button
+anchor.
 
 For live inspection, run:
 

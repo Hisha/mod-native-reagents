@@ -80,6 +80,9 @@ local recipes = {
         reagents={{ id=102, required=3, carried=4 }, { id=103, required=2, carried=1 }} },
     [5] = { name="Duplicate Recipe", kind="optimal", stock=0,
         reagents={{ id=104, required=2, carried=3 }, { id=104, required=2, carried=3 }} },
+    [6] = { name="Runed Copper Pants", kind="optimal", stock=0,
+        reagents={{ id=105, required=8, carried=100 }, { id=106, required=2, carried=8 },
+            { id=107, required=3, carried=2 }} },
 }
 
 function GetItemInfo(id)
@@ -139,7 +142,16 @@ function TradeSkillFrame_Update()
         if name then
             button:SetID(index)
             button:Show()
-            count:SetText(skillType ~= "header" and stockMaximum > 0 and ("[" .. stockMaximum .. "]") or "")
+            if skillType == "header" then
+                button:SetText(name)
+                count:SetText("")
+            elseif stockMaximum > 0 then
+                count:SetText("[" .. stockMaximum .. "]")
+                _G["TradeSkillSkill" .. row .. "Text"]:SetText(name)
+            else
+                button:SetText(name)
+                count:SetText("")
+            end
         else
             button:Hide()
         end
@@ -192,14 +204,17 @@ Event("PLAYER_LOGIN")
 local _, helloRequest = LastRequest("HELLO")
 Reply(helloRequest, "HELLO", "1|1")
 TradeSkillFrame_Show()
-CompleteLatestSync("101:10,102:5,103:10,104:5")
+CompleteLatestSync("101:10,102:5,103:10,104:5,105:17,106:10,107:5")
 assert(NativeReagents.GetQuantity(102) == 5, "sync did not populate stored reagents")
 TradeSkillFrame_Update()
 
-assert(TradeSkillSkill2Count.text == "[5]", "inventory-only list count is wrong")
-assert(TradeSkillSkill3Count.text == "[5]", "bank-only list count is wrong")
-assert(TradeSkillSkill4Count.text == "[3]", "multi-reagent limiting count is wrong")
-assert(TradeSkillSkill5Count.text == "[2]", "duplicate reagent requirements were not aggregated")
+assert(TradeSkillSkill2Text.text == "Inventory Recipe [5]", "inventory-only list count is wrong")
+assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "bank-only list count is wrong")
+assert(TradeSkillSkill4Text.text == "Split Recipe [3]", "mixed inventory/bank limiting count is wrong")
+assert(TradeSkillSkill5Text.text == "Duplicate Recipe [2]", "duplicate reagent requirements were not aggregated")
+assert(TradeSkillSkill6Text.text == "Runed Copper Pants [2]",
+    "117 Copper Bars, 18 Fine Thread, and 7 Rough Grinding Stones did not produce [2]")
+assert(TradeSkillSkill6Count.text == "", "corrected quantity remained on Blizzard's separate count font string")
 assert(TradeSkillFrame.numAvailable == 3, "selected combined maximum is wrong: " .. tostring(TradeSkillFrame.numAvailable))
 assert(TradeSkillReagent1Count.text == "9 /3" and TradeSkillReagent2Count.text == "11 /2",
     "selected reagent totals are wrong")
@@ -215,9 +230,9 @@ assert(craftArguments == "1003|5", "Create All did not use the combined maximum"
 
 recipes[3].reagents[1].carried = 1
 Event("BAG_UPDATE")
-CompleteLatestSync("102:5,103:10,104:5")
+CompleteLatestSync("102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Count.text == "", "insufficient combined materials still show craftable")
+assert(TradeSkillSkill3Text.text == "Bank Recipe", "insufficient combined materials still show craftable")
 assert(TradeSkillFrame.numAvailable == 0, "selected count did not refresh after storage changed")
 assert(not TradeSkillCreateButton.enabled and not TradeSkillCreateAllButton.enabled,
     "Create buttons remained enabled with insufficient combined materials")
@@ -226,22 +241,22 @@ Event("BANKFRAME_OPENED")
 assert(NativeReagents.Withdraw(101, 1), "withdraw request was rejected by the client API")
 local _, withdrawRequest = LastRequest("WITHDRAW")
 Reply(withdrawRequest, "WITHDRAWN", "101|1")
-CompleteLatestSync("101:9,102:5,103:10,104:5")
+CompleteLatestSync("101:9,102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Count.text == "[5]", "withdrawal sync did not refresh the recipe count")
+assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "withdrawal sync did not refresh the recipe count")
 
 assert(NativeReagents.DepositAll(), "deposit request was rejected by the client API")
 local _, depositRequest = LastRequest("DEPOSIT")
 Reply(depositRequest, "DEPOSITED", "1")
-CompleteLatestSync("101:10,102:5,103:10,104:5")
+CompleteLatestSync("101:10,102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Count.text == "[5]", "deposit sync did not refresh the recipe count")
+assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "deposit sync did not refresh the recipe count")
 
 recipes[4].cooldown = 30
 TradeSkillFrame.selectedSkill = 4
 TradeSkillFrame_SetSelection(4)
 TradeSkillFrame_Update()
-assert(TradeSkillSkill4Count.text == "" and TradeSkillFrame.numAvailable == 0,
+assert(TradeSkillSkill4Text.text == "Split Recipe" and TradeSkillFrame.numAvailable == 0,
     "recipe cooldown restriction was not preserved")
 
 local function RequestCount(command)
@@ -263,6 +278,8 @@ emitTradeSkillUpdate = true
 Event("TRADE_SKILL_UPDATE")
 TradeSkillFrame_Update()
 emitTradeSkillUpdate = false
+assert(TradeSkillSkill6Text.text == "Runed Copper Pants [2]",
+    "Blizzard's normal row rendering overwrote the corrected recipe-name count")
 assert(RequestCount("SYNC") == syncRequests, "TRADE_SKILL_UPDATE started a reagent-bank synchronization loop")
 assert(stockUpdateCalls - updates < 20, "nested Blizzard trade-skill updates were unbounded")
 assert(recipeRowHookDepth == 0, "recipe-row hook did not unwind")

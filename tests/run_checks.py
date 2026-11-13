@@ -45,11 +45,11 @@ def main() -> None:
         require(("function NR." + api) in lua, "missing Lua API " + api)
     require("RefreshTradeSkill" not in lua and "refreshingTradeSkill" not in lua,
             "recipe-list-wide refresh implementation remains installed")
-    require('hooksecurefunc(count, "SetText"' in lua,
-            "visible recipe quantities must be attached to Blizzard's row rendering")
+    require('hooksecurefunc(button, "SetText"' in lua and 'hooksecurefunc(text, "SetText"' in lua,
+            "visible recipe quantities must be attached to both Blizzard recipe-name rendering paths")
     require(lua.count("VisibleRecipeMaximum(") == 2 and
-            lua.count("RenderVisibleRecipeCount(") == 2,
-            "recipe-list calculation must be reachable only from the visible-row hook")
+            lua.count("RenderVisibleRecipeCount(") == 3,
+            "recipe-list calculation must be reachable only from the two visible-row hooks")
     require("math.min(GetTradeSkillNumReagents(index) or 0, MAX_TRADE_SKILL_REAGENTS or 8)" in lua,
             "visible recipe calculation is not explicitly bounded")
     calculator = lua.split("local function VisibleRecipeMaximum(index)", 1)[1].split(

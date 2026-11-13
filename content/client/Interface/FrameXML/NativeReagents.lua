@@ -210,7 +210,7 @@ local function VisibleRecipeMaximum(index)
 end
 
 local rowCountRendering = {}
-local function RenderVisibleRecipeCount(row)
+local function RenderVisibleRecipeCount(row, displayedName)
     if rowCountRendering[row] then return end
     local button = _G["TradeSkillSkill" .. row]
     local count = _G["TradeSkillSkill" .. row .. "Count"]
@@ -222,18 +222,9 @@ local function RenderVisibleRecipeCount(row)
     local craftable = VisibleRecipeMaximum(index)
     if craftable == nil then return end
     rowCountRendering[row] = true
-    count:SetText(craftable > 0 and ("[" .. craftable .. "]") or "")
-    if craftable > 0 then
-        TradeSkillFrameDummyString:SetText(text:GetText() or name)
-        local countWidth = count:GetWidth()
-        if TradeSkillFrameDummyString:GetWidth() + 2 + countWidth > TRADE_SKILL_TEXT_WIDTH then
-            text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - countWidth)
-        else
-            text:SetWidth(0)
-        end
-    else
-        text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
-    end
+    text:SetText((displayedName or name) .. (craftable > 0 and (" [" .. craftable .. "]") or ""))
+    text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
+    count:SetText("")
     rowCountRendering[row] = nil
 end
 
@@ -244,9 +235,15 @@ local function InstallTradeSkill()
     hooksecurefunc("TradeSkillFrame_Update", RefreshSelectedRecipe)
     for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
         local rowIndex = row
-        local count = _G["TradeSkillSkill" .. rowIndex .. "Count"]
-        if count then
-            hooksecurefunc(count, "SetText", function() RenderVisibleRecipeCount(rowIndex) end)
+        local button = _G["TradeSkillSkill" .. rowIndex]
+        local text = _G["TradeSkillSkill" .. rowIndex .. "Text"]
+        -- Stock 3.3.5a writes unavailable names through Button:SetText and
+        -- available names directly through the button's Text font string.
+        if button then
+            hooksecurefunc(button, "SetText", function(_, value) RenderVisibleRecipeCount(rowIndex, value) end)
+        end
+        if text then
+            hooksecurefunc(text, "SetText", function(_, value) RenderVisibleRecipeCount(rowIndex, value) end)
         end
     end
     TradeSkillCreateButton:SetScript("OnClick", function()

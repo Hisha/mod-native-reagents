@@ -102,14 +102,25 @@ local function RecipeSpell(index)
     return link and (tonumber(string.match(link, "enchant:(%d+)")) or tonumber(string.match(link, "spell:(%d+)")))
 end
 local function RecipeMax(index)
-    local count, maximum = GetTradeSkillNumReagents(index) or 0, 999999
+    local count, maximum, requirements, available = GetTradeSkillNumReagents(index) or 0, 999999, {}, {}
     for reagent = 1, count do
         local _, _, required, carried = GetTradeSkillReagentInfo(index, reagent)
         local id = ItemId(GetTradeSkillReagentItemLink(index, reagent))
-        local stored = NR.remoteEnabled and NR.GetQuantity(id) or 0
-        if required and required > 0 then maximum = math.min(maximum, math.floor(((carried or 0) + stored) / required)) end
+        if id and required and required > 0 then
+            requirements[id] = (requirements[id] or 0) + required
+            available[id] = math.max(available[id] or 0, carried or 0)
+        end
     end
-    return maximum == 999999 and 0 or maximum
+    for id, required in pairs(requirements) do
+        local total = available[id] + (NR.remoteEnabled and NR.GetQuantity(id) or 0)
+        maximum = math.min(maximum, math.floor(total / required))
+    end
+    if GetTradeSkillCooldown and GetTradeSkillCooldown(index) then return 0 end
+    if maximum == 999999 then
+        local _, skillType, stockMaximum = GetTradeSkillInfo(index)
+        return skillType ~= "header" and math.abs(stockMaximum or 0) or 0
+    end
+    return maximum
 end
 local function UsesStored(index)
     for reagent = 1, GetTradeSkillNumReagents(index) or 0 do
@@ -130,8 +141,43 @@ RefreshTradeSkill = function()
         if count then count:SetText((total >= 100 and "*" or total) .. " /" .. (required or 0)) end
     end
     local maximum = RecipeMax(index)
-    if maximum > 0 and not IsTradeSkillLinked() then TradeSkillCreateButton:Enable(); if TradeSkillCreateAllButton:IsShown() then TradeSkillCreateAllButton:Enable() end end
+    local linked = IsTradeSkillLinked()
+    if maximum > 0 and not linked then
+        TradeSkillCreateButton:Enable()
+        if TradeSkillCreateAllButton:IsShown() then TradeSkillCreateAllButton:Enable() end
+    else
+        TradeSkillCreateButton:Disable()
+        TradeSkillCreateAllButton:Disable()
+    end
     TradeSkillFrame.numAvailable = maximum
+
+    -- Blizzard renders recipe-list quantities from GetTradeSkillInfo(), whose
+    -- numAvailable value only includes ordinary inventory.  Replace those
+    -- visible counts after the stock update with the same combined calculation
+    -- used by Create All and keep the stock name/count layout intact.
+    local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame) or 0
+    for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
+        local skillIndex = offset + row
+        local name, skillType = GetTradeSkillInfo(skillIndex)
+        local button = _G["TradeSkillSkill" .. row]
+        local text = _G["TradeSkillSkill" .. row .. "Text"]
+        local count = _G["TradeSkillSkill" .. row .. "Count"]
+        if name and skillType ~= "header" and button and button:IsShown() and text and count then
+            local craftable = RecipeMax(skillIndex)
+            count:SetText(craftable > 0 and ("[" .. craftable .. "]") or "")
+            if craftable > 0 then
+                TradeSkillFrameDummyString:SetText(text:GetText() or name)
+                local countWidth = count:GetWidth()
+                if TradeSkillFrameDummyString:GetWidth() + 2 + countWidth > TRADE_SKILL_TEXT_WIDTH then
+                    text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - countWidth)
+                else
+                    text:SetWidth(0)
+                end
+            else
+                text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
+            end
+        end
+    end
 end
 local function InstallTradeSkill()
     if NR.tradeHooked or not TradeSkillFrame then return end

@@ -70,6 +70,7 @@ def main() -> None:
                         str(ROOT / "content/client/Interface/FrameXML/NativeReagents.lua"),
                         str(ROOT / "content/client/Interface/FrameXML/NativeReagentsBank.lua")], check=True)
         subprocess.run([str(lua_runner), str(ROOT / "tests/wow_ui_harness.lua")], cwd=ROOT, check=True)
+        subprocess.run([str(lua_runner), str(ROOT / "tests/tradeskill_ui_harness.lua")], cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / "tests/test_sync_protocol.py")], check=True)
     subprocess.run([sys.executable, str(ROOT / "content/build_epf.py")], cwd=ROOT, check=True)
     subprocess.run([sys.executable, str(ROOT / "content/build_epf.py"), "--check"], cwd=ROOT, check=True)

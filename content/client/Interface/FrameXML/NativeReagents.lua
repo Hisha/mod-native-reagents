@@ -60,7 +60,8 @@ function NR.RegisterPresentation(presentation)
 end
 function NR.GetPresentation() return NR.presentation end
 
-local RefreshTradeSkill, refreshingTradeSkill
+local RefreshSelectedRecipe, UpdateStoredReagentCounts
+local combinedReagentCounts, storedReagentCounts = {}, {}
 local function SetStatus(status)
     if NR.status == status then return end
     NR.status = status
@@ -88,10 +89,20 @@ local function CompleteSync(sync)
         for itemId, quantity in pairs(rows) do combined[itemId] = quantity end
     end
     if not NR.activeSync or NR.activeSync.id ~= sync.id then return false end
+    local changed = false
+    for itemId, quantity in pairs(combined) do
+        if NR.items[itemId] ~= quantity then changed = true; break end
+    end
+    if not changed then
+        for itemId in pairs(NR.items) do
+            if combined[itemId] == nil then changed = true; break end
+        end
+    end
     NR.items, NR.activeSync, NR.syncing = combined, nil, false
+    if changed then UpdateStoredReagentCounts() end
     SetStatus("ready")
     Fire("ITEMS_UPDATED", NR.items)
-    RefreshTradeSkill()
+    RefreshSelectedRecipe()
     if NR.resyncPending then NR.resyncPending = false; StartSync(0) end
     return true
 end
@@ -101,7 +112,7 @@ local function RecipeSpell(index)
     local link = GetTradeSkillRecipeLink(index)
     return link and (tonumber(string.match(link, "enchant:(%d+)")) or tonumber(string.match(link, "spell:(%d+)")))
 end
-local function RecipeMax(index)
+local function SelectedRecipeMax(index)
     local count, maximum, requirements, available = GetTradeSkillNumReagents(index) or 0, 999999, {}, {}
     for reagent = 1, count do
         local _, _, required, carried = GetTradeSkillReagentInfo(index, reagent)
@@ -129,12 +140,10 @@ local function UsesStored(index)
         if NR.remoteEnabled and (carried or 0) < (required or 0) and (carried or 0) + NR.GetQuantity(id) >= (required or 0) then return true end
     end
 end
-RefreshTradeSkill = function()
-    if refreshingTradeSkill then return end
+RefreshSelectedRecipe = function()
     if not TradeSkillFrame or not TradeSkillFrame:IsShown() then return end
     local index = TradeSkillFrame.selectedSkill or GetTradeSkillSelectionIndex()
     if not index or index <= 0 then return end
-    refreshingTradeSkill = true
     for reagent = 1, GetTradeSkillNumReagents(index) or 0 do
         local _, _, required, carried = GetTradeSkillReagentInfo(index, reagent)
         local id = ItemId(GetTradeSkillReagentItemLink(index, reagent))
@@ -142,7 +151,7 @@ RefreshTradeSkill = function()
         local count = _G["TradeSkillReagent" .. reagent .. "Count"]
         if count then count:SetText((total >= 100 and "*" or total) .. " /" .. (required or 0)) end
     end
-    local maximum = RecipeMax(index)
+    local maximum = SelectedRecipeMax(index)
     local linked = IsTradeSkillLinked()
     if maximum > 0 and not linked then
         TradeSkillCreateButton:Enable()
@@ -152,41 +161,94 @@ RefreshTradeSkill = function()
         TradeSkillCreateAllButton:Disable()
     end
     TradeSkillFrame.numAvailable = maximum
+end
 
-    -- Blizzard renders recipe-list quantities from GetTradeSkillInfo(), whose
-    -- numAvailable value only includes ordinary inventory.  Replace those
-    -- visible counts after the stock update with the same combined calculation
-    -- used by Create All and keep the stock name/count layout intact.
-    local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame) or 0
-    for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
-        local skillIndex = offset + row
-        local name, skillType = GetTradeSkillInfo(skillIndex)
-        local button = _G["TradeSkillSkill" .. row]
-        local text = _G["TradeSkillSkill" .. row .. "Text"]
-        local count = _G["TradeSkillSkill" .. row .. "Count"]
-        if name and skillType ~= "header" and button and button:IsShown() and text and count then
-            local craftable = RecipeMax(skillIndex)
-            count:SetText(craftable > 0 and ("[" .. craftable .. "]") or "")
-            if craftable > 0 then
-                TradeSkillFrameDummyString:SetText(text:GetText() or name)
-                local countWidth = count:GetWidth()
-                if TradeSkillFrameDummyString:GetWidth() + 2 + countWidth > TRADE_SKILL_TEXT_WIDTH then
-                    text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - countWidth)
-                else
-                    text:SetWidth(0)
-                end
-            else
-                text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
+local function ReagentKey(name, texture)
+    if not name then return nil end
+    return name .. "\031" .. (texture or "")
+end
+
+local function InvalidateCombinedReagentCounts()
+    combinedReagentCounts = {}
+end
+
+UpdateStoredReagentCounts = function()
+    local quantities = {}
+    for itemId, quantity in pairs(NR.items) do
+        local name = GetItemInfo(itemId)
+        local key = ReagentKey(name, GetItemIcon and GetItemIcon(itemId))
+        if key then quantities[key] = (quantities[key] or 0) + quantity end
+    end
+    storedReagentCounts = quantities
+    InvalidateCombinedReagentCounts()
+end
+
+-- Called only from a visible row's stock SetText operation.  This is a bounded,
+-- read-only calculation: it does not query item links, update the profession UI,
+-- request synchronization, send addon messages, or dispatch events.
+local function VisibleRecipeMaximum(index)
+    local requirements, available = {}, {}
+    local reagentCount = math.min(GetTradeSkillNumReagents(index) or 0, MAX_TRADE_SKILL_REAGENTS or 8)
+    for reagent = 1, reagentCount do
+        local name, texture, required, carried = GetTradeSkillReagentInfo(index, reagent)
+        local key = ReagentKey(name, texture)
+        if key and required and required > 0 then
+            requirements[key] = (requirements[key] or 0) + required
+            if combinedReagentCounts[key] == nil then
+                combinedReagentCounts[key] = (carried or 0) + (storedReagentCounts[key] or 0)
             end
+            available[key] = combinedReagentCounts[key]
         end
     end
-    refreshingTradeSkill = false
+    local maximum = 999999
+    for key, required in pairs(requirements) do
+        maximum = math.min(maximum, math.floor((available[key] or 0) / required))
+    end
+    if maximum == 999999 then return nil end
+    if GetTradeSkillCooldown and GetTradeSkillCooldown(index) then return 0 end
+    return maximum
 end
+
+local rowCountRendering = {}
+local function RenderVisibleRecipeCount(row)
+    if rowCountRendering[row] then return end
+    local button = _G["TradeSkillSkill" .. row]
+    local count = _G["TradeSkillSkill" .. row .. "Count"]
+    local text = _G["TradeSkillSkill" .. row .. "Text"]
+    local index = button and button:GetID()
+    local name, skillType = index and GetTradeSkillInfo(index)
+    if not name or skillType == "header" or not button:IsShown() or not count or not text then return end
+
+    local craftable = VisibleRecipeMaximum(index)
+    if craftable == nil then return end
+    rowCountRendering[row] = true
+    count:SetText(craftable > 0 and ("[" .. craftable .. "]") or "")
+    if craftable > 0 then
+        TradeSkillFrameDummyString:SetText(text:GetText() or name)
+        local countWidth = count:GetWidth()
+        if TradeSkillFrameDummyString:GetWidth() + 2 + countWidth > TRADE_SKILL_TEXT_WIDTH then
+            text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - countWidth)
+        else
+            text:SetWidth(0)
+        end
+    else
+        text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
+    end
+    rowCountRendering[row] = nil
+end
+
 local function InstallTradeSkill()
     if NR.tradeHooked or not TradeSkillFrame then return end
     NR.tradeHooked = true
-    hooksecurefunc("TradeSkillFrame_SetSelection", RefreshTradeSkill)
-    hooksecurefunc("TradeSkillFrame_Update", RefreshTradeSkill)
+    hooksecurefunc("TradeSkillFrame_SetSelection", RefreshSelectedRecipe)
+    hooksecurefunc("TradeSkillFrame_Update", RefreshSelectedRecipe)
+    for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
+        local rowIndex = row
+        local count = _G["TradeSkillSkill" .. rowIndex .. "Count"]
+        if count then
+            hooksecurefunc(count, "SetText", function() RenderVisibleRecipeCount(rowIndex) end)
+        end
+    end
     TradeSkillCreateButton:SetScript("OnClick", function()
         local index, count = TradeSkillFrame.selectedSkill, math.max(1, TradeSkillInputBox:GetNumber() or 1)
         if UsesStored(index) then local spell = RecipeSpell(index); if spell then Send("CRAFT", spell, count) else Notice("Unable to identify this recipe.") end
@@ -194,7 +256,7 @@ local function InstallTradeSkill()
         TradeSkillInputBox:ClearFocus()
     end)
     TradeSkillCreateAllButton:SetScript("OnClick", function()
-        local index = TradeSkillFrame.selectedSkill; local count = math.max(1, RecipeMax(index)); TradeSkillInputBox:SetNumber(count)
+        local index = TradeSkillFrame.selectedSkill; local count = math.max(1, SelectedRecipeMax(index)); TradeSkillInputBox:SetNumber(count)
         if UsesStored(index) then local spell = RecipeSpell(index); if spell then Send("CRAFT", spell, count) end else DoTradeSkill(index, count) end
         TradeSkillInputBox:ClearFocus()
     end)
@@ -212,12 +274,13 @@ events:SetScript("OnEvent", function(self, event, ...)
     if event == "BANKFRAME_CLOSED" then NR.bankOpen = false; Send("BANKCLOSE"); Fire("BANK_CLOSED"); return end
     if event == "ADDON_LOADED" then if (...) == "Blizzard_TradeSkillUI" then InstallTradeSkill(); NR.RequestSync() end return end
     if event == "TRADE_SKILL_UPDATE" then
-        if TradeSkillFrame and TradeSkillFrame:IsShown() then RefreshTradeSkill() end
+        if TradeSkillFrame and TradeSkillFrame:IsShown() then RefreshSelectedRecipe() end
         return
     end
     if event == "BAG_UPDATE" then
+        InvalidateCombinedReagentCounts()
         if TradeSkillFrame and TradeSkillFrame:IsShown() then
-            RefreshTradeSkill()
+            RefreshSelectedRecipe()
             NR.RequestSync()
         end
         return

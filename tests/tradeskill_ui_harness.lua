@@ -1,6 +1,7 @@
 local sent, frames, hooks = {}, {}, {}
 local Event
 local unpackValues = table.unpack or unpack
+local recipeRowHookDepth = 0
 
 local function Widget(shown)
     local widget = { shown = shown ~= false, enabled = true, text = "", width = 20, scripts = {}, events = {} }
@@ -15,6 +16,8 @@ local function Widget(shown)
     function widget:SetWidth(value) self.setWidth = value; self.width = value end
     function widget:SetNumber(value) self.number = value end
     function widget:GetNumber() return self.number or 1 end
+    function widget:SetID(value) self.id = value end
+    function widget:GetID() return self.id end
     function widget:ClearFocus() self.focusCleared = true end
     function widget:SetScript(name, callback) self.scripts[name] = callback end
     function widget:RegisterEvent(event) self.events[event] = true end
@@ -26,16 +29,29 @@ function CreateFrame()
     table.insert(frames, frame)
     return frame
 end
-function hooksecurefunc(name, callback)
-    local original = _G[name]
-    hooks[name] = callback
-    _G[name] = function(...)
+function hooksecurefunc(target, name, callback)
+    if type(target) == "table" then
+        local original = target[name]
+        target[name] = function(...)
+            local results = { original(...) }
+            recipeRowHookDepth = recipeRowHookDepth + 1
+            callback(...)
+            recipeRowHookDepth = recipeRowHookDepth - 1
+            return unpackValues(results)
+        end
+        return
+    end
+    callback = name
+    local original = _G[target]
+    hooks[target] = callback
+    _G[target] = function(...)
         local results = { original(...) }
         callback(...)
         return unpackValues(results)
     end
 end
 function SendAddonMessage(prefix, payload, channel, target)
+    assert(recipeRowHookDepth == 0, "recipe-row calculation sent an addon message")
     table.insert(sent, { prefix=prefix, payload=payload, channel=channel, target=target })
 end
 function UnitName() return "Tester" end
@@ -66,6 +82,15 @@ local recipes = {
         reagents={{ id=104, required=2, carried=3 }, { id=104, required=2, carried=3 }} },
 }
 
+function GetItemInfo(id)
+    for _, recipe in pairs(recipes) do
+        for _, reagent in ipairs(recipe.reagents) do
+            if reagent.id == id then return "Reagent" .. id end
+        end
+    end
+end
+function GetItemIcon(id) return "Texture" .. id end
+
 function GetTradeSkillInfo(index)
     local recipe = recipes[index]
     if not recipe then return nil end
@@ -74,7 +99,7 @@ end
 function GetTradeSkillNumReagents(index) return recipes[index] and #recipes[index].reagents or 0 end
 function GetTradeSkillReagentInfo(index, reagent)
     local row = recipes[index].reagents[reagent]
-    return "Reagent", "Texture", row.required, row.carried
+    return "Reagent" .. row.id, "Texture" .. row.id, row.required, row.carried
 end
 local emitTradeSkillUpdate = false
 function GetTradeSkillReagentItemLink(index, reagent)
@@ -95,16 +120,30 @@ for reagent = 1, 8 do _G["TradeSkillReagent" .. reagent .. "Count"] = Widget() e
 
 local stockUpdateCalls = 0
 function TradeSkillFrame_SetSelection(index)
+    assert(recipeRowHookDepth == 0, "recipe-row calculation called TradeSkillFrame_SetSelection")
     local name, skillType = GetTradeSkillInfo(index)
     if not name or skillType == "header" then return end
     TradeSkillFrame.selectedSkill = index
     for reagent = 1, GetTradeSkillNumReagents(index) do GetTradeSkillReagentInfo(index, reagent) end
 end
 function TradeSkillFrame_Update()
+    assert(recipeRowHookDepth == 0, "recipe-row calculation called TradeSkillFrame_Update")
     stockUpdateCalls = stockUpdateCalls + 1
     assert(stockUpdateCalls < 100, "Blizzard trade-skill update lifecycle did not terminate")
     local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
-    for row = 1, TRADE_SKILLS_DISPLAYED do GetTradeSkillInfo(offset + row) end
+    for row = 1, TRADE_SKILLS_DISPLAYED do
+        local index = offset + row
+        local name, skillType, stockMaximum = GetTradeSkillInfo(index)
+        local button = _G["TradeSkillSkill" .. row]
+        local count = _G["TradeSkillSkill" .. row .. "Count"]
+        if name then
+            button:SetID(index)
+            button:Show()
+            count:SetText(skillType ~= "header" and stockMaximum > 0 and ("[" .. stockMaximum .. "]") or "")
+        else
+            button:Hide()
+        end
+    end
     for index = 1, #recipes do
         local _, _, stockMaximum = GetTradeSkillInfo(index)
         if index == TradeSkillFrame.selectedSkill then TradeSkillFrame.numAvailable = math.abs(stockMaximum or 0) end
@@ -125,6 +164,7 @@ end
 assert(lifecycle, "Native Reagents event frame was not created")
 
 Event = function(event, ...)
+    assert(recipeRowHookDepth == 0, "recipe-row calculation dispatched a profession event")
     if event == "TRADE_SKILL_UPDATE" and TradeSkillFrame:IsShown() then
         TradeSkillFrame_SetSelection(GetTradeSkillSelectionIndex())
         TradeSkillFrame_Update()
@@ -153,18 +193,20 @@ local _, helloRequest = LastRequest("HELLO")
 Reply(helloRequest, "HELLO", "1|1")
 TradeSkillFrame_Show()
 CompleteLatestSync("101:10,102:5,103:10,104:5")
+assert(NativeReagents.GetQuantity(102) == 5, "sync did not populate stored reagents")
+TradeSkillFrame_Update()
 
 assert(TradeSkillSkill2Count.text == "[5]", "inventory-only list count is wrong")
 assert(TradeSkillSkill3Count.text == "[5]", "bank-only list count is wrong")
 assert(TradeSkillSkill4Count.text == "[3]", "multi-reagent limiting count is wrong")
 assert(TradeSkillSkill5Count.text == "[2]", "duplicate reagent requirements were not aggregated")
-assert(TradeSkillFrame.numAvailable == 3, "selected combined maximum is wrong")
+assert(TradeSkillFrame.numAvailable == 3, "selected combined maximum is wrong: " .. tostring(TradeSkillFrame.numAvailable))
 assert(TradeSkillReagent1Count.text == "9 /3" and TradeSkillReagent2Count.text == "11 /2",
     "selected reagent totals are wrong")
 assert(TradeSkillCreateButton.enabled and TradeSkillCreateAllButton.enabled, "combined materials did not enable crafting")
 
 TradeSkillFrame.selectedSkill = 3
-hooks.TradeSkillFrame_SetSelection(3)
+TradeSkillFrame_SetSelection(3)
 assert(TradeSkillFrame.numAvailable == 5 and TradeSkillCreateButton.enabled, "bank-only selection is unavailable")
 
 TradeSkillCreateAllButton.scripts.OnClick()
@@ -174,6 +216,7 @@ assert(craftArguments == "1003|5", "Create All did not use the combined maximum"
 recipes[3].reagents[1].carried = 1
 Event("BAG_UPDATE")
 CompleteLatestSync("102:5,103:10,104:5")
+TradeSkillFrame_Update()
 assert(TradeSkillSkill3Count.text == "", "insufficient combined materials still show craftable")
 assert(TradeSkillFrame.numAvailable == 0, "selected count did not refresh after storage changed")
 assert(not TradeSkillCreateButton.enabled and not TradeSkillCreateAllButton.enabled,
@@ -184,17 +227,20 @@ assert(NativeReagents.Withdraw(101, 1), "withdraw request was rejected by the cl
 local _, withdrawRequest = LastRequest("WITHDRAW")
 Reply(withdrawRequest, "WITHDRAWN", "101|1")
 CompleteLatestSync("101:9,102:5,103:10,104:5")
+TradeSkillFrame_Update()
 assert(TradeSkillSkill3Count.text == "[5]", "withdrawal sync did not refresh the recipe count")
 
 assert(NativeReagents.DepositAll(), "deposit request was rejected by the client API")
 local _, depositRequest = LastRequest("DEPOSIT")
 Reply(depositRequest, "DEPOSITED", "1")
 CompleteLatestSync("101:10,102:5,103:10,104:5")
+TradeSkillFrame_Update()
 assert(TradeSkillSkill3Count.text == "[5]", "deposit sync did not refresh the recipe count")
 
 recipes[4].cooldown = 30
 TradeSkillFrame.selectedSkill = 4
 TradeSkillFrame_SetSelection(4)
+TradeSkillFrame_Update()
 assert(TradeSkillSkill4Count.text == "" and TradeSkillFrame.numAvailable == 0,
     "recipe cooldown restriction was not preserved")
 
@@ -207,20 +253,21 @@ local function RequestCount(command)
     return count
 end
 
--- Opening a real profession runs Blizzard's SetSelection/Update lifecycle.  A
--- reagent-link query for a non-selected visible recipe can synchronously emit
--- TRADE_SKILL_UPDATE, which runs both Blizzard's handler and ours.  That event
--- must refresh only presentation state: starting SYNC here makes each DATA
--- completion query the link again and perpetually request another snapshot.
+-- Opening a real profession runs Blizzard's SetSelection/Update lifecycle.
+-- Keep the old failure stimulus enabled: if the visible-row path ever queries
+-- a non-selected reagent link again, it synchronously emits TRADE_SKILL_UPDATE.
+-- The row callback also rejects update/selection calls, events, and messages.
 local syncRequests = RequestCount("SYNC")
 local updates = stockUpdateCalls
 emitTradeSkillUpdate = true
 Event("TRADE_SKILL_UPDATE")
+TradeSkillFrame_Update()
 emitTradeSkillUpdate = false
 assert(RequestCount("SYNC") == syncRequests, "TRADE_SKILL_UPDATE started a reagent-bank synchronization loop")
 assert(stockUpdateCalls - updates < 20, "nested Blizzard trade-skill updates were unbounded")
+assert(recipeRowHookDepth == 0, "recipe-row hook did not unwind")
 
 Event("BAG_UPDATE")
 assert(RequestCount("SYNC") == syncRequests + 1, "BAG_UPDATE no longer synchronizes changed bank quantities")
 
-print("PASS profession combined craftable counts, Blizzard lifecycle feedback, and bounded synchronization")
+print("PASS visible-row craftable counts, pure bounded calculation, and selected-recipe behavior")

@@ -1,4 +1,5 @@
 local sent, frames, hooks = {}, {}, {}
+local Event
 local unpackValues = table.unpack or unpack
 
 local function Widget(shown)
@@ -45,7 +46,7 @@ function DoTradeSkill(index, count) _G.lastStockCraft = { index, count } end
 
 TRADE_SKILLS_DISPLAYED, TRADE_SKILL_TEXT_WIDTH = 8, 275
 TradeSkillListScrollFrame = Widget()
-TradeSkillFrame = Widget()
+TradeSkillFrame = Widget(false)
 TradeSkillFrame.selectedSkill = 4
 TradeSkillCreateButton = Widget()
 TradeSkillCreateAllButton = Widget()
@@ -75,7 +76,9 @@ function GetTradeSkillReagentInfo(index, reagent)
     local row = recipes[index].reagents[reagent]
     return "Reagent", "Texture", row.required, row.carried
 end
+local emitTradeSkillUpdate = false
 function GetTradeSkillReagentItemLink(index, reagent)
+    if emitTradeSkillUpdate and index ~= TradeSkillFrame.selectedSkill then Event("TRADE_SKILL_UPDATE") end
     return "|Hitem:" .. recipes[index].reagents[reagent].id .. ":0:0:0|h[item]|h"
 end
 function GetTradeSkillRecipeLink(index) return "|Henchant:" .. (1000 + index) .. "|h[recipe]|h" end
@@ -90,8 +93,28 @@ for row = 1, TRADE_SKILLS_DISPLAYED do
 end
 for reagent = 1, 8 do _G["TradeSkillReagent" .. reagent .. "Count"] = Widget() end
 
-function TradeSkillFrame_SetSelection(index) TradeSkillFrame.selectedSkill = index end
-function TradeSkillFrame_Update() end
+local stockUpdateCalls = 0
+function TradeSkillFrame_SetSelection(index)
+    local name, skillType = GetTradeSkillInfo(index)
+    if not name or skillType == "header" then return end
+    TradeSkillFrame.selectedSkill = index
+    for reagent = 1, GetTradeSkillNumReagents(index) do GetTradeSkillReagentInfo(index, reagent) end
+end
+function TradeSkillFrame_Update()
+    stockUpdateCalls = stockUpdateCalls + 1
+    assert(stockUpdateCalls < 100, "Blizzard trade-skill update lifecycle did not terminate")
+    local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
+    for row = 1, TRADE_SKILLS_DISPLAYED do GetTradeSkillInfo(offset + row) end
+    for index = 1, #recipes do
+        local _, _, stockMaximum = GetTradeSkillInfo(index)
+        if index == TradeSkillFrame.selectedSkill then TradeSkillFrame.numAvailable = math.abs(stockMaximum or 0) end
+    end
+end
+function TradeSkillFrame_Show()
+    TradeSkillFrame:Show()
+    TradeSkillFrame_SetSelection(GetTradeSkillSelectionIndex())
+    TradeSkillFrame_Update()
+end
 
 assert(loadfile("content/client/Interface/FrameXML/NativeReagents.lua"))()
 
@@ -101,7 +124,11 @@ for _, frame in ipairs(frames) do
 end
 assert(lifecycle, "Native Reagents event frame was not created")
 
-local function Event(event, ...)
+Event = function(event, ...)
+    if event == "TRADE_SKILL_UPDATE" and TradeSkillFrame:IsShown() then
+        TradeSkillFrame_SetSelection(GetTradeSkillSelectionIndex())
+        TradeSkillFrame_Update()
+    end
     lifecycle.scripts.OnEvent(lifecycle, event, ...)
 end
 local function LastRequest(command)
@@ -124,6 +151,7 @@ end
 Event("PLAYER_LOGIN")
 local _, helloRequest = LastRequest("HELLO")
 Reply(helloRequest, "HELLO", "1|1")
+TradeSkillFrame_Show()
 CompleteLatestSync("101:10,102:5,103:10,104:5")
 
 assert(TradeSkillSkill2Count.text == "[5]", "inventory-only list count is wrong")
@@ -170,16 +198,29 @@ TradeSkillFrame_SetSelection(4)
 assert(TradeSkillSkill4Count.text == "" and TradeSkillFrame.numAvailable == 0,
     "recipe cooldown restriction was not preserved")
 
--- A queried native API can synchronously cause Blizzard's hooked update path
--- to run again.  Refreshing the list must not recursively re-enter itself.
-local stockGetTradeSkillInfo, infoCalls = GetTradeSkillInfo, 0
-GetTradeSkillInfo = function(index)
-    infoCalls = infoCalls + 1
-    assert(infoCalls < 100, "trade-skill refresh recursively re-entered")
-    TradeSkillFrame_Update()
-    return stockGetTradeSkillInfo(index)
+local function RequestCount(command)
+    local count = 0
+    for _, message in ipairs(sent) do
+        local found = string.match(message.payload, "^%d+|%d+|([^|]+)")
+        if found == command then count = count + 1 end
+    end
+    return count
 end
-TradeSkillFrame_Update()
-assert(infoCalls < 30, "nested trade-skill updates caused a refresh loop")
 
-print("PASS profession combined craftable counts, recursive hooks, and bounded refresh behavior")
+-- Opening a real profession runs Blizzard's SetSelection/Update lifecycle.  A
+-- reagent-link query for a non-selected visible recipe can synchronously emit
+-- TRADE_SKILL_UPDATE, which runs both Blizzard's handler and ours.  That event
+-- must refresh only presentation state: starting SYNC here makes each DATA
+-- completion query the link again and perpetually request another snapshot.
+local syncRequests = RequestCount("SYNC")
+local updates = stockUpdateCalls
+emitTradeSkillUpdate = true
+Event("TRADE_SKILL_UPDATE")
+emitTradeSkillUpdate = false
+assert(RequestCount("SYNC") == syncRequests, "TRADE_SKILL_UPDATE started a reagent-bank synchronization loop")
+assert(stockUpdateCalls - updates < 20, "nested Blizzard trade-skill updates were unbounded")
+
+Event("BAG_UPDATE")
+assert(RequestCount("SYNC") == syncRequests + 1, "BAG_UPDATE no longer synchronizes changed bank quantities")
+
+print("PASS profession combined craftable counts, Blizzard lifecycle feedback, and bounded synchronization")

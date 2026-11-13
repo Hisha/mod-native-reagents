@@ -211,7 +211,17 @@ events:SetScript("OnEvent", function(self, event, ...)
     end
     if event == "BANKFRAME_CLOSED" then NR.bankOpen = false; Send("BANKCLOSE"); Fire("BANK_CLOSED"); return end
     if event == "ADDON_LOADED" then if (...) == "Blizzard_TradeSkillUI" then InstallTradeSkill(); NR.RequestSync() end return end
-    if event == "TRADE_SKILL_UPDATE" or event == "BAG_UPDATE" then if TradeSkillFrame and TradeSkillFrame:IsShown() then RefreshTradeSkill(); NR.RequestSync() end return end
+    if event == "TRADE_SKILL_UPDATE" then
+        if TradeSkillFrame and TradeSkillFrame:IsShown() then RefreshTradeSkill() end
+        return
+    end
+    if event == "BAG_UPDATE" then
+        if TradeSkillFrame and TradeSkillFrame:IsShown() then
+            RefreshTradeSkill()
+            NR.RequestSync()
+        end
+        return
+    end
     local prefix, message, channel, sender = ...
     if prefix ~= PREFIX or channel ~= "WHISPER" or sender ~= UnitName("player") then return end
     local version, request, kind, body = string.match(message, "^(%d+)|(%d+)|([^|]+)|?(.*)$")

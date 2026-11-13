@@ -45,15 +45,19 @@ def main() -> None:
         require(("function NR." + api) in lua, "missing Lua API " + api)
     require("RefreshTradeSkill" not in lua and "refreshingTradeSkill" not in lua,
             "recipe-list-wide refresh implementation remains installed")
-    require('hooksecurefunc(button, "SetText"' in lua and 'hooksecurefunc(text, "SetText"' in lua,
-            "visible recipe quantities must be attached to both Blizzard recipe-name rendering paths")
+    require('hooksecurefunc(button, "SetText"' not in lua and 'hooksecurefunc(text, "SetText"' not in lua and
+            "rowCountRendering" not in lua and "RenderVisibleRecipeCount" not in lua,
+            "per-row recipe-name hooks remain installed")
     require(lua.count("VisibleRecipeMaximum(") == 2 and
-            lua.count("RenderVisibleRecipeCount(") == 3,
-            "recipe-list calculation must be reachable only from the two visible-row hooks")
+            lua.count("ApplyVisibleRecipeCounts()") == 2,
+            "recipe-list presentation must run only after Blizzard updates and completed synchronization")
+    require('hooksecurefunc("TradeSkillFrame_Update", function()' in lua and
+            'count:SetText(craftable and craftable > 0 and ("[" .. craftable .. "]") or "")' in lua,
+            "visible recipe quantities must use Blizzard's update hook and dedicated count font string")
     require("math.min(GetTradeSkillNumReagents(index) or 0, MAX_TRADE_SKILL_REAGENTS or 8)" in lua,
             "visible recipe calculation is not explicitly bounded")
     calculator = lua.split("local function VisibleRecipeMaximum(index)", 1)[1].split(
-        "local rowCountRendering", 1)[0]
+        "ApplyVisibleRecipeCounts = function()", 1)[0]
     for forbidden in ("TradeSkillFrame_Update", "TradeSkillFrame_SetSelection", "RequestSync",
                       "GetTradeSkillReagentItemLink", "SendAddonMessage", "Send(", "Fire(",
                       "SetText", "SetWidth"):

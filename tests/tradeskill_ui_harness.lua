@@ -204,17 +204,26 @@ Event("PLAYER_LOGIN")
 local _, helloRequest = LastRequest("HELLO")
 Reply(helloRequest, "HELLO", "1|1")
 TradeSkillFrame_Show()
+local updatesBeforeSync = stockUpdateCalls
 CompleteLatestSync("101:10,102:5,103:10,104:5,105:17,106:10,107:5")
 assert(NativeReagents.GetQuantity(102) == 5, "sync did not populate stored reagents")
+assert(stockUpdateCalls == updatesBeforeSync, "completed synchronization triggered a Blizzard profession update")
+assert(TradeSkillSkill6Text.text == "Runed Copper Pants" and TradeSkillSkill6Count.text == "[2]",
+    "completed synchronization did not directly reapply the visible recipe count")
 TradeSkillFrame_Update()
 
-assert(TradeSkillSkill2Text.text == "Inventory Recipe [5]", "inventory-only list count is wrong")
-assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "bank-only list count is wrong")
-assert(TradeSkillSkill4Text.text == "Split Recipe [3]", "mixed inventory/bank limiting count is wrong")
-assert(TradeSkillSkill5Text.text == "Duplicate Recipe [2]", "duplicate reagent requirements were not aggregated")
-assert(TradeSkillSkill6Text.text == "Runed Copper Pants [2]",
-    "117 Copper Bars, 18 Fine Thread, and 7 Rough Grinding Stones did not produce [2]")
-assert(TradeSkillSkill6Count.text == "", "corrected quantity remained on Blizzard's separate count font string")
+assert(TradeSkillSkill2Text.text == "Inventory Recipe" and TradeSkillSkill2Count.text == "[5]",
+    "inventory-only list count is wrong")
+assert(TradeSkillSkill3Text.text == "Bank Recipe" and TradeSkillSkill3Count.text == "[5]",
+    "bank-only list count is wrong")
+assert(TradeSkillSkill4Text.text == "Split Recipe" and TradeSkillSkill4Count.text == "[3]",
+    "mixed inventory/bank limiting count is wrong")
+assert(TradeSkillSkill5Text.text == "Duplicate Recipe" and TradeSkillSkill5Count.text == "[2]",
+    "duplicate reagent requirements were not aggregated")
+assert(TradeSkillSkill6Text.text == "Runed Copper Pants",
+    "corrected quantity changed the Runed Copper Pants recipe name")
+assert(TradeSkillSkill6Count.text == "[2]",
+    "117 Copper Bars, 18 Fine Thread, and 7 Rough Grinding Stones did not produce [2] in the count font string")
 assert(TradeSkillFrame.numAvailable == 3, "selected combined maximum is wrong: " .. tostring(TradeSkillFrame.numAvailable))
 assert(TradeSkillReagent1Count.text == "9 /3" and TradeSkillReagent2Count.text == "11 /2",
     "selected reagent totals are wrong")
@@ -232,7 +241,8 @@ recipes[3].reagents[1].carried = 1
 Event("BAG_UPDATE")
 CompleteLatestSync("102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Text.text == "Bank Recipe", "insufficient combined materials still show craftable")
+assert(TradeSkillSkill3Text.text == "Bank Recipe" and TradeSkillSkill3Count.text == "",
+    "insufficient combined materials still show craftable")
 assert(TradeSkillFrame.numAvailable == 0, "selected count did not refresh after storage changed")
 assert(not TradeSkillCreateButton.enabled and not TradeSkillCreateAllButton.enabled,
     "Create buttons remained enabled with insufficient combined materials")
@@ -243,14 +253,16 @@ local _, withdrawRequest = LastRequest("WITHDRAW")
 Reply(withdrawRequest, "WITHDRAWN", "101|1")
 CompleteLatestSync("101:9,102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "withdrawal sync did not refresh the recipe count")
+assert(TradeSkillSkill3Text.text == "Bank Recipe" and TradeSkillSkill3Count.text == "[5]",
+    "withdrawal sync did not refresh the recipe count")
 
 assert(NativeReagents.DepositAll(), "deposit request was rejected by the client API")
 local _, depositRequest = LastRequest("DEPOSIT")
 Reply(depositRequest, "DEPOSITED", "1")
 CompleteLatestSync("101:10,102:5,103:10,104:5,105:17,106:10,107:5")
 TradeSkillFrame_Update()
-assert(TradeSkillSkill3Text.text == "Bank Recipe [5]", "deposit sync did not refresh the recipe count")
+assert(TradeSkillSkill3Text.text == "Bank Recipe" and TradeSkillSkill3Count.text == "[5]",
+    "deposit sync did not refresh the recipe count")
 
 recipes[4].cooldown = 30
 TradeSkillFrame.selectedSkill = 4
@@ -278,8 +290,8 @@ emitTradeSkillUpdate = true
 Event("TRADE_SKILL_UPDATE")
 TradeSkillFrame_Update()
 emitTradeSkillUpdate = false
-assert(TradeSkillSkill6Text.text == "Runed Copper Pants [2]",
-    "Blizzard's normal row rendering overwrote the corrected recipe-name count")
+assert(TradeSkillSkill6Text.text == "Runed Copper Pants" and TradeSkillSkill6Count.text == "[2]",
+    "Blizzard's normal row rendering overwrote the corrected recipe count")
 assert(RequestCount("SYNC") == syncRequests, "TRADE_SKILL_UPDATE started a reagent-bank synchronization loop")
 assert(stockUpdateCalls - updates < 20, "nested Blizzard trade-skill updates were unbounded")
 assert(recipeRowHookDepth == 0, "recipe-row hook did not unwind")

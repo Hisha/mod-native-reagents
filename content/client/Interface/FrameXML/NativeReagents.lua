@@ -60,7 +60,7 @@ function NR.RegisterPresentation(presentation)
 end
 function NR.GetPresentation() return NR.presentation end
 
-local RefreshSelectedRecipe, UpdateStoredReagentCounts
+local RefreshSelectedRecipe, UpdateStoredReagentCounts, ApplyVisibleRecipeCounts
 local combinedReagentCounts, storedReagentCounts = {}, {}
 local function SetStatus(status)
     if NR.status == status then return end
@@ -103,6 +103,7 @@ local function CompleteSync(sync)
     SetStatus("ready")
     Fire("ITEMS_UPDATED", NR.items)
     RefreshSelectedRecipe()
+    ApplyVisibleRecipeCounts()
     if NR.resyncPending then NR.resyncPending = false; StartSync(0) end
     return true
 end
@@ -183,9 +184,9 @@ UpdateStoredReagentCounts = function()
     InvalidateCombinedReagentCounts()
 end
 
--- Called only from a visible row's stock SetText operation.  This is a bounded,
--- read-only calculation: it does not query item links, update the profession UI,
--- request synchronization, send addon messages, or dispatch events.
+-- Called only while applying counts to Blizzard's visible recipe rows.  This is
+-- a bounded, read-only calculation: it does not query item links, update the
+-- profession UI, request synchronization, send addon messages, or dispatch events.
 local function VisibleRecipeMaximum(index)
     local requirements, available = {}, {}
     local reagentCount = math.min(GetTradeSkillNumReagents(index) or 0, MAX_TRADE_SKILL_REAGENTS or 8)
@@ -209,43 +210,39 @@ local function VisibleRecipeMaximum(index)
     return maximum
 end
 
-local rowCountRendering = {}
-local function RenderVisibleRecipeCount(row, displayedName)
-    if rowCountRendering[row] then return end
-    local button = _G["TradeSkillSkill" .. row]
-    local count = _G["TradeSkillSkill" .. row .. "Count"]
-    local text = _G["TradeSkillSkill" .. row .. "Text"]
-    local index = button and button:GetID()
-    local name, skillType = index and GetTradeSkillInfo(index)
-    if not name or skillType == "header" or not button:IsShown() or not count or not text then return end
+ApplyVisibleRecipeCounts = function()
+    if not TradeSkillFrame or not TradeSkillFrame:IsShown() then return end
+    local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
+    for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
+        local index = offset + row
+        local name, skillType = GetTradeSkillInfo(index)
+        local text = _G["TradeSkillSkill" .. row .. "Text"]
+        local count = _G["TradeSkillSkill" .. row .. "Count"]
+        if name and skillType ~= "header" and count then
+            local craftable = VisibleRecipeMaximum(index)
+            count:SetText(craftable and craftable > 0 and ("[" .. craftable .. "]") or "")
 
-    local craftable = VisibleRecipeMaximum(index)
-    if craftable == nil then return end
-    rowCountRendering[row] = true
-    text:SetText((displayedName or name) .. (craftable > 0 and (" [" .. craftable .. "]") or ""))
-    text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
-    count:SetText("")
-    rowCountRendering[row] = nil
+            -- Match Blizzard's name/count spacing without changing the name.
+            if text and TradeSkillFrameDummyString then
+                TradeSkillFrameDummyString:SetText(text:GetText() or name)
+                if TradeSkillFrameDummyString:GetWidth() + 2 + count:GetWidth() > TRADE_SKILL_TEXT_WIDTH then
+                    text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - count:GetWidth())
+                else
+                    text:SetWidth(0)
+                end
+            end
+        end
+    end
 end
 
 local function InstallTradeSkill()
     if NR.tradeHooked or not TradeSkillFrame then return end
     NR.tradeHooked = true
     hooksecurefunc("TradeSkillFrame_SetSelection", RefreshSelectedRecipe)
-    hooksecurefunc("TradeSkillFrame_Update", RefreshSelectedRecipe)
-    for row = 1, TRADE_SKILLS_DISPLAYED or 8 do
-        local rowIndex = row
-        local button = _G["TradeSkillSkill" .. rowIndex]
-        local text = _G["TradeSkillSkill" .. rowIndex .. "Text"]
-        -- Stock 3.3.5a writes unavailable names through Button:SetText and
-        -- available names directly through the button's Text font string.
-        if button then
-            hooksecurefunc(button, "SetText", function(_, value) RenderVisibleRecipeCount(rowIndex, value) end)
-        end
-        if text then
-            hooksecurefunc(text, "SetText", function(_, value) RenderVisibleRecipeCount(rowIndex, value) end)
-        end
-    end
+    hooksecurefunc("TradeSkillFrame_Update", function()
+        RefreshSelectedRecipe()
+        ApplyVisibleRecipeCounts()
+    end)
     TradeSkillCreateButton:SetScript("OnClick", function()
         local index, count = TradeSkillFrame.selectedSkill, math.max(1, TradeSkillInputBox:GetNumber() or 1)
         if UsesStored(index) then local spell = RecipeSpell(index); if spell then Send("CRAFT", spell, count) else Notice("Unable to identify this recipe.") end

@@ -10,12 +10,13 @@ local slotWidth, slotHeight, columnPitch, rowPitch = 37, 37, 49, 44
 -- row 423, so its visible bottom is 88 UI units above the logical frame bottom.
 -- HitRectInsets bottom=70 is interaction geometry, not the artwork boundary.
 local artworkBottomInset = 88
--- The decoration-free stone floor at x=22..382, y=318..390 in UI-BankFrame
--- exactly matches the reagent surface width.  Repeating this native-size crop
--- preserves the stock artwork without restoring its baked slot or bag outlines.
-local backgroundWidth, backgroundHeight, backgroundTileHeight = 360, 352, 72
+-- The decoration-free stone floor at x=22..387, y=318..390 in UI-BankFrame
+-- covers the reagent surface and its lower-right seam.  Repeating this
+-- native-size crop preserves the stock artwork without restoring its baked
+-- slot or bag outlines.
+local backgroundWidth, backgroundHeight, backgroundTileHeight = 365, 346, 72
 local backgroundSourceTop = 318
-local backgroundLeft, backgroundRight = 22 / 512, 382 / 512
+local backgroundLeft, backgroundRight = 22 / 512, 387 / 512
 local backgroundTop = backgroundSourceTop / 512
 local stockObjects, stockLabels, stockState = {}, {}, nil
 local reagentsSelected = false
@@ -293,7 +294,7 @@ local function Build()
 
     -- UI-BankFrame is monolithic, so use its undecorated lower stone floor as
     -- native-size strips over the stock inventory interior.  The last strip is
-    -- cropped rather than scaled; all others retain the source's 360x72 aspect.
+    -- cropped rather than scaled; all others retain the source's 365x72 aspect.
     candidate.backgroundTiles = candidate.backgroundTiles or {}
     for i = 1, math.ceil(backgroundHeight / backgroundTileHeight) do
         local tile = candidate.backgroundTiles[i] or candidate:CreateTexture(nil, "BACKGROUND")
@@ -309,9 +310,9 @@ local function Build()
 
     local tabAnchor = _G.NativeReagentsTabAnchor or CreateFrame("Frame", "NativeReagentsTabAnchor", BankFrame)
     tabAnchor:ClearAllPoints()
-    -- Match the reagent surface's bottom-border junction.  Keeping the anchor
+    -- Match the adjusted background's bottom-border junction.  Keeping the anchor
     -- and both tab parents on BankFrame avoids scale or page-switch drift.
-    tabAnchor:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 11, artworkBottomInset + 4)
+    tabAnchor:SetPoint("BOTTOMLEFT", BankFrame, "BOTTOMLEFT", 11, artworkBottomInset + 10)
     tabAnchor:SetSize(1, 1)
     local bankTab = _G.NativeReagentsBankTab or CreateFrame("Button", "NativeReagentsBankTab", BankFrame, "CharacterFrameTabButtonTemplate")
     bankTab:ClearAllPoints()

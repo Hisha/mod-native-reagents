@@ -63,13 +63,14 @@ its inventory interior is covered. Bank mode hides that surface and restores the
 visibility of the stock controls and labels before asking Blizzard to refresh their state.
 
 The reagent surface covers the stock inventory decorations with five native-scale crops from
-the undecorated 360-by-72 stone floor at texture pixels `(22, 318)` through `(382, 390)` in
-`UI-BankFrame`. Four strips use the complete crop; the last uses its first 64 rows. This keeps
+the undecorated 365-by-72 stone floor at texture pixels `(22, 318)` through `(387, 390)` in
+`UI-BankFrame`. Four strips use the complete crop; the last uses its first 58 rows. This keeps
 the original bank stone artwork at a 1:1 aspect without restoring the sheet's baked item slots,
-bag slots, or money bar.
+bag slots, or money bar. The resulting background is 365 by 346 UI units, with its top-left
+fixed at `BankFrame TOPLEFT + (22, -68)`.
 
-The external tab anchor is `BankFrame BOTTOMLEFT + (11, 92)`: the stock 11-unit horizontal tab
-inset, plus the texture's measured 88-unit alpha inset and the reagent surface's four-unit
+The external tab anchor is `BankFrame BOTTOMLEFT + (11, 98)`: the stock 11-unit horizontal tab
+inset, plus the texture's measured 88-unit alpha inset and the adjusted background's ten-unit
 border inset. This puts the tab frame's top edge on the same bottom-border junction instead of
 leaving a gap. Both tabs remain children
 of `BankFrame`, and the second tab remains horizontally attached to the first, so scale and page

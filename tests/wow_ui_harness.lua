@@ -165,7 +165,7 @@ assert(NativeReagentsTabAnchor.points[1][1] == "BOTTOMLEFT", "tab anchor lost it
 assert(NativeReagentsTabAnchor.points[1][2] == BankFrame, "tab anchor lost BankFrame parent geometry")
 assert(NativeReagentsTabAnchor.points[1][3] == "BOTTOMLEFT", "tab anchor is not based on BankFrame bottom")
 assert(NativeReagentsTabAnchor.points[1][4] == 11, "tab anchor lost the stock horizontal inset")
-assert(NativeReagentsTabAnchor.points[1][5] == 92, "tab anchor is not flush with the bottom-border junction")
+assert(NativeReagentsTabAnchor.points[1][5] == 98, "tab anchor is not flush with the adjusted background edge")
 assert(NativeReagentsBankTab.points[1][2] == NativeReagentsTabAnchor, "Bank tab is not attached to the visible-border anchor")
 assert(NativeReagentsBankTab.points[1][3] == "BOTTOMLEFT", "Bank tab is not attached beneath the visible border")
 for slot = 1, 35 do
@@ -184,9 +184,9 @@ assert(NativeReagentsBankFrame.points[1][5] == -68 and NativeReagentsBankFrame.p
 assert(#NativeReagentsBankFrame.backgroundTiles == 5, "stock bank background does not cover the reagent page")
 for index, tile in ipairs(NativeReagentsBankFrame.backgroundTiles) do
     assert(tile.texture[1] == "Interface\\BankFrame\\UI-BankFrame", "background tile lost stock bank artwork")
-    assert(tile.width == 360 and tile.height == (index < 5 and 72 or 64),
+    assert(tile.width == 365 and tile.height == (index < 5 and 72 or 58),
         "background tile changed the stock crop proportions")
-    assert(tile.texCoord[1] == 22 / 512 and tile.texCoord[2] == 382 / 512 and tile.texCoord[3] == 318 / 512,
+    assert(tile.texCoord[1] == 22 / 512 and tile.texCoord[2] == 387 / 512 and tile.texCoord[3] == 318 / 512,
         "background tile changed the stock crop coordinates")
 end
 

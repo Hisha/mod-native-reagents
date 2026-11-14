@@ -60,7 +60,7 @@ function NR.RegisterPresentation(presentation)
 end
 function NR.GetPresentation() return NR.presentation end
 
-local QueueRefresh
+local QueueRefresh, InvalidateTradeSkillFilter
 local function SetStatus(status)
     if NR.status == status then return end
     NR.status = status
@@ -91,6 +91,7 @@ local function CompleteSync(sync)
     NR.items, NR.activeSync, NR.syncing = combined, nil, false
     SetStatus("ready")
     Fire("ITEMS_UPDATED", NR.items)
+    InvalidateTradeSkillFilter()
     QueueRefresh()
     if NR.resyncPending then NR.resyncPending = false; StartSync(0) end
     return true
@@ -133,6 +134,160 @@ local function RecipeUsesVirtual(index)
     return false
 end
 
+local filteredTradeSkills = { dirty=true, indices=nil }
+InvalidateTradeSkillFilter = function()
+    filteredTradeSkills.dirty = true
+end
+
+local function TradeSkillFilterEnabled()
+    return TradeSkillFrameAvailableFilterCheckButton and TradeSkillFrameAvailableFilterCheckButton:GetChecked()
+end
+
+local function NativeIndexForVisibleRow(visibleIndex)
+    if TradeSkillFilterEnabled() and filteredTradeSkills.indices then
+        return filteredTradeSkills.indices[visibleIndex]
+    end
+    return visibleIndex
+end
+
+local function BuildFilteredTradeSkills()
+    filteredTradeSkills.dirty = false
+    if not TradeSkillFilterEnabled() then filteredTradeSkills.indices = nil; return end
+
+    local indices = {}
+    local headerIndex, headerAdded, headerExpanded
+    local function FinishHeader()
+        -- Collapsed children are not exposed by the 3.3.5 API.  Retain their
+        -- header without expanding it or changing the user's category state.
+        if headerIndex and not headerAdded and not headerExpanded then
+            table.insert(indices, headerIndex)
+        end
+    end
+    for index = 1, GetNumTradeSkills() or 0 do
+        local name, skillType, _, isExpanded = GetTradeSkillInfo(index)
+        if name and skillType == "header" then
+            FinishHeader()
+            headerIndex, headerAdded, headerExpanded = index, false, isExpanded and true or false
+        elseif name and RecipeMax(index) > 0 then
+            if headerIndex and not headerAdded then
+                table.insert(indices, headerIndex)
+                headerAdded = true
+            end
+            table.insert(indices, index)
+        end
+    end
+    FinishHeader()
+    filteredTradeSkills.indices = indices
+end
+
+local function FilterContains(index)
+    for _, nativeIndex in ipairs(filteredTradeSkills.indices or {}) do
+        if nativeIndex == index then return true end
+    end
+    return false
+end
+
+local function ClearTradeSkillSelection()
+    TradeSkillFrame.selectedSkill = 0
+    TradeSkillFrame.numAvailable = 0
+    TradeSkillCreateButton:Disable()
+    TradeSkillCreateAllButton:Disable()
+    if TradeSkillHighlightFrame then TradeSkillHighlightFrame:Hide() end
+    if TradeSkillSkillName then TradeSkillSkillName:SetText("") end
+    if TradeSkillSkillCooldown then TradeSkillSkillCooldown:SetText("") end
+    if TradeSkillSkillIcon then TradeSkillSkillIcon:SetNormalTexture("") end
+    if TradeSkillDescription then TradeSkillDescription:SetText("") end
+    for reagent = 1, MAX_TRADE_SKILL_REAGENTS or 8 do
+        local button = _G["TradeSkillReagent" .. reagent]
+        if button then button:Hide() end
+    end
+end
+
+local function EnsureFilteredSelection()
+    if not TradeSkillFilterEnabled() or FilterContains(TradeSkillFrame.selectedSkill) then return end
+    for _, index in ipairs(filteredTradeSkills.indices or {}) do
+        local _, skillType = GetTradeSkillInfo(index)
+        if skillType and skillType ~= "header" then
+            TradeSkillFrame_SetSelection(index)
+            return
+        end
+    end
+    ClearTradeSkillSelection()
+end
+
+local function RenderFilteredTradeSkills()
+    if not TradeSkillFilterEnabled() then return end
+    local indices = filteredTradeSkills.indices or {}
+    local maximumOffset = math.max(0, #indices - TRADE_SKILLS_DISPLAYED)
+    local offset = math.min(FauxScrollFrame_GetOffset(TradeSkillListScrollFrame), maximumOffset)
+    if offset ~= FauxScrollFrame_GetOffset(TradeSkillListScrollFrame) then
+        FauxScrollFrame_SetOffset(TradeSkillListScrollFrame, offset)
+    end
+    FauxScrollFrame_Update(TradeSkillListScrollFrame, #indices, TRADE_SKILLS_DISPLAYED,
+        TRADE_SKILL_HEIGHT, nil, nil, nil, TradeSkillHighlightFrame, 293, 316)
+    TradeSkillHighlightFrame:Hide()
+
+    for row = 1, TRADE_SKILLS_DISPLAYED do
+        local index = indices[offset + row]
+        local button = _G["TradeSkillSkill" .. row]
+        local text = _G["TradeSkillSkill" .. row .. "Text"]
+        local count = _G["TradeSkillSkill" .. row .. "Count"]
+        local highlight = _G["TradeSkillSkill" .. row .. "Highlight"]
+        if index then
+            local name, skillType, _, isExpanded = GetTradeSkillInfo(index)
+            local color = TradeSkillTypeColor[skillType]
+            local prefix = ENABLE_COLORBLIND_MODE == "1" and (TradeSkillTypePrefix[skillType] or " ") or " "
+            button:SetID(index)
+            button:Show()
+            button:SetWidth(TradeSkillListScrollFrame:IsShown() and 293 or 323)
+            if color then
+                button:SetNormalFontObject(color.font)
+                count:SetVertexColor(color.r, color.g, color.b)
+                button.r, button.g, button.b = color.r, color.g, color.b
+            end
+            if skillType == "header" then
+                button:SetText(name)
+                text:SetText(name)
+                text:SetWidth(TRADE_SKILL_TEXT_WIDTH)
+                count:SetText("")
+                button:SetNormalTexture(isExpanded and "Interface\\Buttons\\UI-MinusButton-Up" or
+                    "Interface\\Buttons\\UI-PlusButton-Up")
+                if highlight then highlight:SetTexture("Interface\\Buttons\\UI-PlusButton-Hilight") end
+                button:UnlockHighlight()
+                button.isHighlighted = false
+            else
+                local maximum = RecipeMax(index)
+                local displayName = prefix .. name
+                button:SetNormalTexture("")
+                if highlight then highlight:SetTexture("") end
+                button:SetText(displayName)
+                text:SetText(displayName)
+                count:SetText(maximum > 0 and ("[" .. maximum .. "]") or "")
+                TradeSkillFrameDummyString:SetText(displayName)
+                if TradeSkillFrameDummyString:GetWidth() + 2 + count:GetWidth() > TRADE_SKILL_TEXT_WIDTH then
+                    text:SetWidth(TRADE_SKILL_TEXT_WIDTH - 2 - count:GetWidth())
+                else
+                    text:SetWidth(0)
+                end
+                if TradeSkillFrame.selectedSkill == index then
+                    TradeSkillHighlightFrame:SetPoint("TOPLEFT", button, "TOPLEFT", 0, 0)
+                    TradeSkillHighlightFrame:Show()
+                    count:SetVertexColor(HIGHLIGHT_FONT_COLOR.r, HIGHLIGHT_FONT_COLOR.g, HIGHLIGHT_FONT_COLOR.b)
+                    button:LockHighlight()
+                    button.isHighlighted = true
+                else
+                    button:UnlockHighlight()
+                    button.isHighlighted = false
+                end
+            end
+        else
+            button:Hide()
+            button:UnlockHighlight()
+            button.isHighlighted = false
+        end
+    end
+end
+
 local function ApplySelection()
     if not TradeSkillFrame or not TradeSkillFrame:IsShown() then return end
     local index = TradeSkillFrame.selectedSkill or GetTradeSkillSelectionIndex()
@@ -165,8 +320,9 @@ local function ApplyList()
     if not TradeSkillFrame or not TradeSkillFrame:IsShown() then return end
     local offset = FauxScrollFrame_GetOffset(TradeSkillListScrollFrame)
     for row = 1, TRADE_SKILLS_DISPLAYED do
-        local index = row + offset
-        local name, skillType = GetTradeSkillInfo(index)
+        local index = NativeIndexForVisibleRow(row + offset)
+        local name, skillType
+        if index then name, skillType = GetTradeSkillInfo(index) end
         local button = _G["TradeSkillSkill" .. row]
         local text = _G["TradeSkillSkill" .. row .. "Text"]
         local count = _G["TradeSkillSkill" .. row .. "Count"]
@@ -188,6 +344,9 @@ local function ApplyList()
 end
 
 local function RefreshUI()
+    if filteredTradeSkills.dirty then BuildFilteredTradeSkills() end
+    EnsureFilteredSelection()
+    RenderFilteredTradeSkills()
     ApplySelection()
     ApplyList()
 end
@@ -216,8 +375,51 @@ end
 local function InstallTradeSkill()
     if NR.tradeHooked or not TradeSkillFrame then return end
     NR.tradeHooked = true
+    local NativeTradeSkillOnlyShowMakeable = TradeSkillOnlyShowMakeable
+    local disablingNativeFilter = false
+    local function DisableNativeTradeSkillFilter()
+        if disablingNativeFilter then return end
+        disablingNativeFilter = true
+        NativeTradeSkillOnlyShowMakeable(false)
+        disablingNativeFilter = false
+    end
+    -- Blizzard reapplies this filter from TradeSkillFrame_Show.  Keep the
+    -- native list complete so bank-only recipes remain available to our map.
+    TradeSkillOnlyShowMakeable = function() DisableNativeTradeSkillFilter() end
+    DisableNativeTradeSkillFilter()
+    TradeSkillFrameAvailableFilterCheckButton:SetScript("OnClick", function()
+        DisableNativeTradeSkillFilter()
+        InvalidateTradeSkillFilter()
+        FauxScrollFrame_SetOffset(TradeSkillListScrollFrame, 0)
+        TradeSkillFrame_Update()
+    end)
     hooksecurefunc("TradeSkillFrame_SetSelection", ApplySelection)
     hooksecurefunc("TradeSkillFrame_Update", RefreshUI)
+    hooksecurefunc("TradeSkillFrame_Show", function()
+        DisableNativeTradeSkillFilter()
+        InvalidateTradeSkillFilter()
+        QueueRefresh()
+    end)
+    local lastFilterArguments = {}
+    for _, functionName in ipairs({ "SetTradeSkillItemNameFilter", "SetTradeSkillItemLevelFilter",
+        "SetTradeSkillSubClassFilter", "SetTradeSkillInvSlotFilter" }) do
+        local hookedName = functionName
+        if type(_G[hookedName]) == "function" then
+            hooksecurefunc(hookedName, function(...)
+                local arguments = ""
+                for argument = 1, select("#", ...) do
+                    arguments = arguments .. "\031" .. tostring(select(argument, ...))
+                end
+                if lastFilterArguments[hookedName] ~= arguments then
+                    lastFilterArguments[hookedName] = arguments
+                    InvalidateTradeSkillFilter()
+                end
+            end)
+        end
+    end
+    for _, functionName in ipairs({ "ExpandTradeSkillSubClass", "CollapseTradeSkillSubClass" }) do
+        if type(_G[functionName]) == "function" then hooksecurefunc(functionName, InvalidateTradeSkillFilter) end
+    end
     TradeSkillCreateButton:SetScript("OnClick", function()
         local index, count = TradeSkillFrame.selectedSkill, math.max(1, TradeSkillInputBox:GetNumber() or 1)
         if NR.remoteEnabled and RecipeUsesVirtual(index) then local spell = SpellIDForRecipe(index); if spell then Send("CRAFT", spell, count) else Notice("Unable to identify this recipe.") end
@@ -229,12 +431,12 @@ local function InstallTradeSkill()
         if NR.remoteEnabled and RecipeUsesVirtual(index) then local spell = SpellIDForRecipe(index); if spell then Send("CRAFT", spell, count) end else DoTradeSkill(index, count) end
         TradeSkillInputBox:ClearFocus()
     end)
-    TradeSkillFrame:HookScript("OnShow", function() NR.RequestSync() end)
+    TradeSkillFrame:HookScript("OnShow", function() InvalidateTradeSkillFilter(); NR.RequestSync() end)
 end
 
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN"); events:RegisterEvent("CHAT_MSG_ADDON"); events:RegisterEvent("BANKFRAME_OPENED")
-events:RegisterEvent("BANKFRAME_CLOSED"); events:RegisterEvent("ADDON_LOADED"); events:RegisterEvent("TRADE_SKILL_UPDATE"); events:RegisterEvent("BAG_UPDATE")
+events:RegisterEvent("BANKFRAME_CLOSED"); events:RegisterEvent("ADDON_LOADED"); events:RegisterEvent("TRADE_SKILL_UPDATE"); events:RegisterEvent("TRADE_SKILL_FILTER_UPDATE"); events:RegisterEvent("BAG_UPDATE")
 events:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then NR.helloStarted = GetTime(); Send("HELLO"); StartSync(0); return end
     if event == "BANKFRAME_OPENED" then
@@ -243,12 +445,14 @@ events:SetScript("OnEvent", function(self, event, ...)
     end
     if event == "BANKFRAME_CLOSED" then NR.bankOpen = false; Send("BANKCLOSE"); Fire("BANK_CLOSED"); return end
     if event == "ADDON_LOADED" then if (...) == "Blizzard_TradeSkillUI" then InstallTradeSkill(); NR.RequestSync() end return end
-    if event == "TRADE_SKILL_UPDATE" then
+    if event == "TRADE_SKILL_UPDATE" or event == "TRADE_SKILL_FILTER_UPDATE" then
+        InvalidateTradeSkillFilter()
         if TradeSkillFrame and TradeSkillFrame:IsShown() then QueueRefresh() end
         return
     end
     if event == "BAG_UPDATE" then
         if TradeSkillFrame and TradeSkillFrame:IsShown() then
+            InvalidateTradeSkillFilter()
             QueueRefresh()
             NR.RequestSync()
         end

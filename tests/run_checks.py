@@ -52,13 +52,26 @@ def main() -> None:
         require(("local function " + function) in lua, "original profession function is missing: " + function)
     require('ItemIDFromLink(GetTradeSkillReagentItemLink(skillIndex, reagentIndex))' in lua,
             "recipe calculations do not resolve exact reagent item IDs")
-    require('local index = row + offset' in lua and
+    require('local index = NativeIndexForVisibleRow(row + offset)' in lua and
             '_G["TradeSkillSkill" .. row .. "Count"]' in lua,
             "ApplyList does not map the scrolled API index to Blizzard's count fontstring")
     require('hooksecurefunc("TradeSkillFrame_Update", RefreshUI)' in lua,
             "original post-Blizzard profession update lifecycle is missing")
     require('TradeSkillFrame:HookScript("OnShow"' in lua,
             "profession open lifecycle is missing")
+    require("local function BuildFilteredTradeSkills()" in lua and
+            "local function RenderFilteredTradeSkills()" in lua and
+            "local function NativeIndexForVisibleRow" in lua,
+            "bank-aware visible recipe mapping is missing")
+    require('TradeSkillOnlyShowMakeable = function() DisableNativeTradeSkillFilter() end' in lua and
+            'NativeTradeSkillOnlyShowMakeable(false)' in lua,
+            "Blizzard's inventory-only materials filter is not held disabled")
+    require('TradeSkillFrameAvailableFilterCheckButton:SetScript("OnClick"' in lua,
+            "Have Materials checkbox is not intercepted")
+    require("GetItemCount =" not in lua and "function GetItemCount" not in lua,
+            "implementation must not override GetItemCount")
+    require('button:SetID(index)' in lua and 'TradeSkillFrame_SetSelection(index)' in lua,
+            "filtered rows do not retain native recipe indices")
     require(lua.count("local function ApplyList()") == 1,
             "there must be exactly one recipe-list implementation")
     bank_lua = (ROOT / "content/client/Interface/FrameXML/NativeReagentsBank.lua").read_text()

@@ -43,24 +43,24 @@ def main() -> None:
     lua = (ROOT / "content/client/Interface/FrameXML/NativeReagents.lua").read_text()
     for api in ("IsAvailable", "IsReady", "GetStatus", "IsBankOpen", "GetItems", "GetQuantity", "DepositAll", "Withdraw", "GetAutoDeposit", "SetAutoDeposit", "RegisterCallback", "RegisterPresentation"):
         require(("function NR." + api) in lua, "missing Lua API " + api)
-    require("RefreshTradeSkill" not in lua and "refreshingTradeSkill" not in lua,
-            "recipe-list-wide refresh implementation remains installed")
-    require('hooksecurefunc(count, "SetText"' in lua,
-            "visible recipe quantities must be attached to Blizzard's row rendering")
-    require(lua.count("VisibleRecipeMaximum(") == 2 and
-            lua.count("RenderVisibleRecipeCount(") == 2,
-            "recipe-list calculation must be reachable only from the visible-row hook")
-    require("math.min(GetTradeSkillNumReagents(index) or 0, MAX_TRADE_SKILL_REAGENTS or 8)" in lua,
-            "visible recipe calculation is not explicitly bounded")
-    calculator = lua.split("local function VisibleRecipeMaximum(index)", 1)[1].split(
-        "local rowCountRendering", 1)[0]
-    for forbidden in ("TradeSkillFrame_Update", "TradeSkillFrame_SetSelection", "RequestSync",
-                      "GetTradeSkillReagentItemLink", "SendAddonMessage", "Send(", "Fire(",
-                      "SetText", "SetWidth"):
-        require(forbidden not in calculator,
-                "visible recipe calculation contains forbidden call " + forbidden)
-    require(lua.count("InvalidateCombinedReagentCounts()") == 3,
-            "combined reagent cache must be invalidated only by inventory or changed bank contents")
+    for obsolete in ("VisibleRecipeMaximum", "ApplyVisibleRecipeCounts", "RenderVisibleRecipeCount",
+                     "ReagentKey", "combinedReagentCounts", "storedReagentCounts", "rowCountRendering"):
+        require(obsolete not in lua, "experimental recipe-list mechanism remains: " + obsolete)
+    require('hooksecurefunc(count, "SetText"' not in lua,
+            "recursive recipe-count SetText hook remains installed")
+    for function in ("CombinedForReagent", "RecipeMax", "ApplySelection", "ApplyList"):
+        require(("local function " + function) in lua, "original profession function is missing: " + function)
+    require('ItemIDFromLink(GetTradeSkillReagentItemLink(skillIndex, reagentIndex))' in lua,
+            "recipe calculations do not resolve exact reagent item IDs")
+    require('local index = row + offset' in lua and
+            '_G["TradeSkillSkill" .. row .. "Count"]' in lua,
+            "ApplyList does not map the scrolled API index to Blizzard's count fontstring")
+    require('hooksecurefunc("TradeSkillFrame_Update", RefreshUI)' in lua,
+            "original post-Blizzard profession update lifecycle is missing")
+    require('TradeSkillFrame:HookScript("OnShow"' in lua,
+            "profession open lifecycle is missing")
+    require(lua.count("local function ApplyList()") == 1,
+            "there must be exactly one recipe-list implementation")
     bank_lua = (ROOT / "content/client/Interface/FrameXML/NativeReagentsBank.lua").read_text()
     require("local columns, rows, perPage = 7, 5, 35" in bank_lua, "reagent page must use the five-row layout")
     require("Bank-Background" not in bank_lua.replace("post-Wrath Bank-Background", ""),

@@ -51,7 +51,7 @@ money display, and standard behavior.
 
 ### Crafting
 
-- Optional crafting from stored-only or mixed inventory/bank materials.
+- Crafting from stored-only or mixed inventory/bank materials, enabled by default.
 - Carried materials are consumed first; only the missing quantity is temporarily
   materialized from storage for the normal AzerothCore spell cast.
 - The server revalidates the learned trade-skill spell and material availability, then
@@ -60,12 +60,12 @@ money display, and standard behavior.
 - Create and Create All are supported, with queued creation capped at 1,000 casts.
 
 > [!IMPORTANT]
-> Storage-backed crafting is implemented but disabled by default. A module hook cannot
-> make spell effects and a failed completion-database commit one atomic operation.
-> Keep `NativeReagents.RemoteCraft.Enable = 0` outside isolated testing unless your
-> deployment has explicitly accepted the recovery behavior described in
-> [`docs/REMOTE_CRAFTING_SAFETY.md`](docs/REMOTE_CRAFTING_SAFETY.md). Ordinary
-> inventory-only crafting continues through Blizzard's standard `DoTradeSkill` path.
+> Storage-backed crafting is enabled by default (`NativeReagents.RemoteCraft.Enable = 1`).
+> A module hook cannot make spell effects and a failed completion-database commit one
+> atomic operation. Review the recovery behavior and residual risks in
+> [`docs/REMOTE_CRAFTING_SAFETY.md`](docs/REMOTE_CRAFTING_SAFETY.md) before deployment;
+> set `NativeReagents.RemoteCraft.Enable = 0` if those risks are unacceptable.
+> Ordinary inventory-only crafting continues through Blizzard's standard `DoTradeSkill` path.
 
 Native Reagents does not patch AzerothCore itself and does not alter guild banks.
 
@@ -133,7 +133,8 @@ AzerothCore's module configuration installation. Merge or copy the generated dis
 template into the realm's active module configuration using the same process as the other
 AzerothCore modules, then review the settings below.
 
-For a production banking deployment, leave remote crafting disabled.
+Remote crafting is enabled by default. Review the storage-backed crafting safety notes
+before deployment and disable it explicitly if your deployment does not accept those risks.
 
 ### 4. Generate or verify the client EPF
 
@@ -180,7 +181,7 @@ All supported settings are defined in `conf/mod_native_reagents.conf.dist`.
 | `NativeReagents.AutoDeposit.Enable` | `1` | Allows characters to enable persistent automatic deposit when opening a banker. |
 | `NativeReagents.Storage.MaxTypes` | `0` | Maximum distinct stored item entries per character; `0` is unlimited. |
 | `NativeReagents.Storage.MaxQuantityPerItem` | `0` | Maximum stored quantity for one item entry; `0` is unlimited. |
-| `NativeReagents.RemoteCraft.Enable` | `0` | Enables experimental crafting with banked materials. Keep disabled for normal deployments. |
+| `NativeReagents.RemoteCraft.Enable` | `1` | Enables crafting with banked materials by default; set to `0` to disable it. Review the documented recovery limitations. |
 | `NativeReagents.RemoteCraft.TransactionTimeoutSeconds` | `30` | Seconds before a temporary crafting loan is rolled back; the effective minimum is 5 seconds. |
 | `NativeReagents.BankerSession.TimeoutSeconds` | `300` | Maximum idle age of a validated banker session; the effective minimum is 5 seconds. |
 | `NativeReagents.UI.Enable` | `1` | Enables the injected native-bank presentation path. |
@@ -201,8 +202,8 @@ state.
 5. Open a standard profession window. Recipe quantities and selected-recipe requirements now
    use carried plus stored material counts.
 6. Enable **Have Materials** to show recipes craftable from the combined balances.
-7. Craft normally with inventory-held materials. If experimental remote crafting has been
-   deliberately enabled, Create and Create All can also draw missing reagents from storage.
+7. Craft normally with Create or Create All. With remote crafting enabled by default,
+   missing reagents can be drawn from storage after inventory-held materials are used.
 
 Deposits, withdrawals, and Auto Deposit changes are available only while the validated
 personal-bank session remains active. Closing the bank, moving out of range, logging out, or
@@ -232,9 +233,9 @@ temporarily materializes only the shortage, and lets AzerothCore perform its nor
 
 - The native interface targets WoW 3.3.5a build 12340 and requires a protected FrameXML
   client patch. It is not supported as an ordinary addon.
-- Storage-backed crafting is experimental and disabled by default because module hooks cannot
-  provide a transaction spanning core reagent consumption, arbitrary spell effects, and the
-  completion database commit. See
+- Storage-backed crafting is enabled by default, but module hooks cannot provide a
+  transaction spanning core reagent consumption, arbitrary spell effects, and the
+  completion database commit. Review the recovery limitations before deployment; see
   [`docs/REMOTE_CRAFTING_SAFETY.md`](docs/REMOTE_CRAFTING_SAFETY.md).
 - Remote crafting does not bypass ordinary recipe ownership, crafting-station,
   profession-tool, inventory-capacity, or other spell-cast requirements.

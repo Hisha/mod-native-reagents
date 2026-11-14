@@ -31,6 +31,7 @@ public:
     uint32 CountTypes(Player* player) const;
     std::vector<StorageRow> List(Player* player, uint32 offset, uint32 limit) const;
     uint64 DepositAll(Player* player, std::string& error, uint64 operationId = 0) const;
+    bool Deposit(Player* player, uint32 itemEntry, uint32 amount, std::string& error, uint64 operationId = 0) const;
     bool Withdraw(Player* player, uint32 itemEntry, uint32 amount, std::string& error, uint64 operationId = 0) const;
     void NoteBanker(Player* player, Creature* banker, bool clientOpened = false);
     bool ConfirmBankerOpen(Player* player, std::string* reason = nullptr);

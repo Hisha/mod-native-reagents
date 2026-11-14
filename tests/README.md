@@ -4,6 +4,11 @@ Run `python3 tests/run_checks.py`. The suite compiles protocol and safety-policy
 executes controlled commit-failure/duplicate/concurrency models, simulates synchronization
 ordering/timeouts/retries, and checks the Schema-3 manifest, pinned stock TOC, deterministic
 EPF contents, backward-compatible SQL, journal schema, quest protection, limits, and Lua API.
+The storage model tests include exact full, partial, and multi-stack individual deposits;
+insufficient, ineligible, quest-protected, stateful-instance, quantity/type-limit, missing/expired
+banker, duplicate, concurrent, and commit-failure paths. The Lua harness verifies strict public
+argument handling, request framing, and correlated completion callbacks. These are not live-client
+cursor tests.
 It also compiles both client files with the available Lua library and executes a mocked WoW
 FrameXML lifecycle covering 35-button initialization, empty/populated pagination, mutually
 exclusive pages, inherited stock-region suppression, content-mask/tab/footer geometry,

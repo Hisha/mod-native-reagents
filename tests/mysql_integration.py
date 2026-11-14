@@ -46,12 +46,12 @@ def main() -> None:
     sql("START TRANSACTION; "
         f"UPDATE native_reagents_test_inventory SET quantity=quantity-5 WHERE guid={guid} AND item_entry={entry}; "
         f"INSERT INTO character_bank_reagents VALUES({guid},{entry},5) ON DUPLICATE KEY UPDATE quantity=VALUES(quantity); "
-        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state,result_amount) VALUES({guid},1,'DEPOSIT','COMPLETED',5); COMMIT")
+        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state,item_entry,amount,result_amount) VALUES({guid},1,'DEPOSIT_ITEM','COMPLETED',{entry},5,5); COMMIT")
     totals(15, 5)
     sql("START TRANSACTION; "
         f"UPDATE native_reagents_test_inventory SET quantity=quantity-3 WHERE guid={guid} AND item_entry={entry}; "
         f"UPDATE character_bank_reagents SET quantity=8 WHERE guid={guid} AND item_entry={entry}; "
-        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state,result_amount) VALUES({guid},2,'DEPOSIT','COMPLETED',3); COMMIT")
+        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state,item_entry,amount,result_amount) VALUES({guid},2,'DEPOSIT_ITEM','COMPLETED',{entry},3,3); COMMIT")
     totals(12, 8)
     sql("START TRANSACTION; "
         f"UPDATE native_reagents_test_inventory SET quantity=quantity+4 WHERE guid={guid} AND item_entry={entry}; "
@@ -72,7 +72,7 @@ def main() -> None:
     sql("START TRANSACTION; "
         f"UPDATE native_reagents_test_inventory SET quantity=0 WHERE guid={guid} AND item_entry={entry}; "
         f"UPDATE character_bank_reagents SET quantity=20 WHERE guid={guid} AND item_entry={entry}; "
-        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state) VALUES({guid},7,'DEPOSIT','COMPLETED'); ROLLBACK")
+        f"INSERT INTO character_native_reagent_operations(guid,operation_id,kind,state,item_entry,amount) VALUES({guid},7,'DEPOSIT_ITEM','COMPLETED',{entry},18); ROLLBACK")
     totals(18, 2)
     assert sql(f"SELECT COUNT(*) FROM character_native_reagent_operations WHERE guid={guid} AND operation_id=7") == "0"
     assert sql(f"SELECT CONCAT(quantity,':',(SELECT COUNT(*) FROM character_native_reagent_operations WHERE guid={guid} AND state='COMPLETED')) FROM character_bank_reagents WHERE guid={guid} AND item_entry={entry}") == "2:4"
@@ -83,7 +83,7 @@ def main() -> None:
     totals(20, 0)
     sql(f"DELETE FROM character_native_reagent_operations WHERE guid={guid}; "
         f"DELETE FROM character_bank_reagents WHERE guid={guid}; DROP TABLE native_reagents_test_inventory")
-    print("PASS real MySQL deposit/withdraw/empty/partial/duplicate/invalid/rollback/persistence")
+    print("PASS real MySQL individual deposit/withdraw/empty/partial/duplicate/invalid/rollback/persistence")
 
 
 if __name__ == "__main__":

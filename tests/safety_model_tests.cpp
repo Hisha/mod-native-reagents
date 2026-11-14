@@ -1,10 +1,12 @@
 #include "../src/NativeReagentsSafety.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstdint>
 #include <iostream>
 #include <limits>
 #include <set>
+#include <vector>
 
 using NativeReagents::Safety::BorrowRecovery;
 using NativeReagents::Safety::CommitDecision;
@@ -77,6 +79,47 @@ struct CraftModel
     }
 };
 
+struct StackDepositModel
+{
+    struct Stack { std::uint64_t count; bool eligible = true; bool questProtected = false; bool plain = true; };
+    std::vector<Stack> stacks;
+    std::uint64_t storage = 0;
+    std::uint64_t quantityLimit = 0;
+    bool typeLimitReached = false;
+    bool banker = true;
+    bool expired = false;
+    std::set<std::uint64_t> committed;
+
+    bool Deposit(std::uint64_t request, std::uint64_t amount, bool databaseCommit = true)
+    {
+        if (committed.count(request)) return true;
+        if (!amount || !banker || expired || typeLimitReached) return false;
+        std::uint64_t available = 0;
+        for (Stack const& stack : stacks)
+            if (stack.eligible && !stack.questProtected && stack.plain) available += stack.count;
+        std::uint64_t next = 0;
+        if (available < amount || !NativeReagents::Safety::CheckedAdd(storage, amount, quantityLimit, next)) return false;
+        auto before = stacks;
+        std::uint64_t remaining = amount;
+        for (Stack& stack : stacks)
+            if (stack.eligible && !stack.questProtected && stack.plain)
+            {
+                std::uint64_t take = std::min(stack.count, remaining);
+                stack.count -= take; remaining -= take;
+                if (!remaining) break;
+            }
+        if (!databaseCommit) { stacks = before; return false; }
+        storage = next; committed.insert(request); return true;
+    }
+
+    std::uint64_t Inventory() const
+    {
+        std::uint64_t total = 0;
+        for (Stack const& stack : stacks) total += stack.count;
+        return total;
+    }
+};
+
 int main()
 {
     Model bank;
@@ -101,6 +144,40 @@ int main()
     bank.busy = true;
     assert(!bank.Deposit(7, 1, true) && !bank.Withdraw(8, 1, true));
     bank.busy = false;
+
+    StackDepositModel stacks;
+    stacks.stacks = {{20}};
+    assert(stacks.Deposit(10, 20) && stacks.Inventory() == 0 && stacks.storage == 20); // full stack
+    stacks.stacks = {{20}};
+    assert(stacks.Deposit(11, 7) && stacks.Inventory() == 13 && stacks.storage == 27); // partial stack
+    stacks.stacks = {{20}, {20}, {20}};
+    assert(stacks.Deposit(12, 40) && stacks.Inventory() == 20 && stacks.storage == 67); // multiple stacks
+    assert(stacks.Deposit(12, 40) && stacks.Inventory() == 20 && stacks.storage == 67); // duplicate
+    auto stackInventory = stacks.Inventory(), stackStorage = stacks.storage;
+    assert(!stacks.Deposit(13, 21) && stacks.Inventory() == stackInventory && stacks.storage == stackStorage);
+    assert(!stacks.Deposit(14, 0));
+    stacks.stacks = {{5, false}, {5, true, true}, {5, true, false, false}};
+    assert(!stacks.Deposit(15, 1)); // ineligible, quest-protected, and stateful instances excluded
+    stacks.stacks = {{10}}; stacks.quantityLimit = stackStorage + 5;
+    assert(!stacks.Deposit(16, 6) && stacks.Inventory() == 10 && stacks.storage == stackStorage);
+    stacks.quantityLimit = 0; stacks.typeLimitReached = true;
+    assert(!stacks.Deposit(17, 1));
+    stacks.typeLimitReached = false; stacks.banker = false;
+    assert(!stacks.Deposit(18, 1));
+    stacks.banker = true; stacks.expired = true;
+    assert(!stacks.Deposit(19, 1));
+    stacks.expired = false;
+    assert(!stacks.Deposit(20, 6, false) && stacks.Inventory() == 10 && stacks.storage == stackStorage);
+
+    StackDepositModel consecutive;
+    consecutive.stacks = {{20}, {20}};
+    assert(consecutive.Deposit(21, 7) && consecutive.Deposit(22, 13));
+    assert(consecutive.Inventory() == 20 && consecutive.storage == 20);
+    CraftModel afterIndividualDeposit{consecutive.Inventory(), consecutive.storage};
+    assert(afterIndividualDeposit.Begin(25, true, true)); // inventory first, then five stored
+    assert(afterIndividualDeposit.inventory == 25 && afterIndividualDeposit.storage == 15);
+    afterIndividualDeposit.Complete(25);
+    assert(afterIndividualDeposit.inventory == 0 && afterIndividualDeposit.storage == 15);
 
     std::uint64_t value = 0;
     assert(!NativeReagents::Safety::CheckedAdd(std::numeric_limits<std::uint64_t>::max(), 1, 0, value));

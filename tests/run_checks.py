@@ -27,7 +27,7 @@ def main() -> None:
     require("DROP TABLE" not in sql.upper() and "ALTER TABLE" not in sql.upper(), "base SQL must be non-destructive")
     require("character_native_reagent_operations" in journal_sql and "FOREIGN KEY" in journal_sql, "safety journal schema missing")
     manager = (ROOT / "src/NativeReagentsManager.cpp").read_text()
-    require(manager.count("SaveInventoryAndGoldToDB(transaction)") == 5,
+    require(manager.count("SaveInventoryAndGoldToDB(transaction)") == 6,
             "all inventory writes must join their reagent transaction")
     require("AsyncCommitTransaction(transaction)" in manager and "callback.m_future.get()" in manager,
             "inventory transactions must execute on an async connection and wait for the real result")
@@ -41,7 +41,11 @@ def main() -> None:
     require("HasQuestForItem" in manager, "quest reagent protection missing")
     require("MaxQuantityPerItem" in manager and "MaxTypes" in manager, "storage limits missing")
     lua = (ROOT / "content/client/Interface/FrameXML/NativeReagents.lua").read_text()
-    for api in ("IsAvailable", "IsReady", "GetStatus", "IsBankOpen", "GetItems", "GetQuantity", "DepositAll", "Withdraw", "GetAutoDeposit", "SetAutoDeposit", "RegisterCallback", "RegisterPresentation"):
+    require("DEPOSIT_ITEM" in manager and "IndividualDepositMatches" in manager and
+            "IsPlainStorageItem" in manager, "individual deposit server path missing")
+    require('request.arguments.size() != 2' in manager and '"bad-individual-deposit"' in manager,
+            "individual deposit protocol parsing is not strict")
+    for api in ("IsAvailable", "IsReady", "GetStatus", "IsBankOpen", "GetItems", "GetQuantity", "DepositAll", "Deposit", "Withdraw", "GetAutoDeposit", "SetAutoDeposit", "RegisterCallback", "RegisterPresentation"):
         require(("function NR." + api) in lua, "missing Lua API " + api)
     for obsolete in ("VisibleRecipeMaximum", "ApplyVisibleRecipeCounts", "RenderVisibleRecipeCount",
                      "ReagentKey", "combinedReagentCounts", "storedReagentCounts", "rowCountRendering"):

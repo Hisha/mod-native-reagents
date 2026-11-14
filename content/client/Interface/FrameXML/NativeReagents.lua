@@ -41,6 +41,13 @@ function NR.GetItems() return NR.items end
 function NR.GetQuantity(itemId) return NR.items[tonumber(itemId)] or 0 end
 function NR.GetAutoDeposit() return NR.autoKnown and NR.autoDeposit or false end
 function NR.DepositAll() if not NR.bankOpen or not NR.IsReady() then return false end Send("DEPOSIT") return true end
+function NR.Deposit(itemId, quantity)
+    itemId, quantity = tonumber(itemId), tonumber(quantity)
+    if not NR.bankOpen or not NR.IsReady() or not itemId or not quantity or
+        itemId < 1 or quantity < 1 or itemId > 4294967295 or quantity > 4294967295 or
+        itemId ~= math.floor(itemId) or quantity ~= math.floor(quantity) then return false end
+    local request = Send("DEPOSIT_ITEM", itemId, quantity); return true, request
+end
 function NR.Withdraw(itemId, quantity)
     itemId, quantity = tonumber(itemId), tonumber(quantity)
     if not NR.bankOpen or not NR.IsReady() or not itemId or not quantity or quantity < 1 then return false end
@@ -490,7 +497,14 @@ events:SetScript("OnEvent", function(self, event, ...)
     end
     if kind == "BANK" then local deposited, enabled = string.match(body, "^(%d+)|([01])$"); NR.lastError = nil; NR.autoDeposit, NR.autoKnown = enabled == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); if tonumber(deposited) and tonumber(deposited) > 0 then NR.RequestSync() end return end
     if kind == "AUTO" then NR.lastError = nil; NR.autoDeposit, NR.autoKnown = body == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); return end
-    if kind == "DEPOSITED" or kind == "WITHDRAWN" then NR.lastError = nil; NR.RequestSync(); return end
+    if kind == "DEPOSITED" or kind == "WITHDRAWN" then
+        NR.lastError = nil
+        if kind == "DEPOSITED" and command == "DEPOSIT_ITEM" then
+            local itemId, quantity = string.match(body, "^(%d+)|(%d+)$")
+            if itemId then Fire("DEPOSITED", tonumber(itemId), tonumber(quantity), request) end
+        end
+        NR.RequestSync(); return
+    end
     if kind == "ERR" then
         NR.lastError = body
         if body == "banker-required" then
@@ -501,7 +515,7 @@ events:SetScript("OnEvent", function(self, event, ...)
         else
             Notice(body)
         end
-        Fire("ERROR", body, command)
+        Fire("ERROR", body, command, request)
         return
     end
 end)

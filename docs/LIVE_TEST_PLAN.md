@@ -60,6 +60,11 @@ deployment or an intentional server revision update.
   confirm active-quest reagents remain carried.
 - Withdraw one stack and shift-selected quantities into empty, partial, and full bags;
   repeat a captured request ID and confirm only one mutation in the server session.
+- Through a conventional addon, call `NativeReagents.Deposit` for a full stack, a partial stack,
+  and a quantity spanning stacks. Verify exact removal, `DEPOSITED`/`ERROR` correlation, snapshot
+  refresh, duplicate replay, insufficient quantity, quest protection, limits, and expired banker
+  rejection. Exercise both whole-stack and caller-owned split-stack drags; confirm submission
+  does not itself clear the cursor and failures can be restored without loss.
 - Toggle Auto Deposit, relog/restart, and confirm preference persistence and manual deposit
   availability while disabled.
 - With empty storage, confirm `No reagents stored` and 35 initialized empty slots. With 1, 35,

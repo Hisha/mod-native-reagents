@@ -130,6 +130,38 @@ bool WithdrawalMatches(uint32 guid, uint64 operationId, uint32 entry, uint32 amo
         "AND item_entry={} AND amount={}", guid, operationId, entry, amount) != nullptr;
 }
 
+bool IndividualDepositMatches(uint32 guid, uint64 operationId, uint32 entry, uint32 amount)
+{
+    return CharacterDatabase.Query(
+        "SELECT 1 FROM character_native_reagent_operations "
+        "WHERE guid={} AND operation_id={} AND kind='DEPOSIT_ITEM' AND state='COMPLETED' "
+        "AND item_entry={} AND amount={}", guid, operationId, entry, amount) != nullptr;
+}
+
+// Storage records only an item entry and quantity. Reject instances whose state
+// could not be reconstructed by the ordinary StoreNewItem withdrawal path.
+bool IsPlainStorageItem(Item const* item)
+{
+    if (!item || !item->GetTemplate() || item->IsSoulBound() || item->IsRefundable() ||
+        item->IsBOPTradable() || item->IsWrapped() || item->IsInTrade() || item->m_lootGenerated ||
+        item->GetItemRandomPropertyId() || item->GetItemSuffixFactor() || !item->GetText().empty())
+        return false;
+    ItemTemplate const* proto = item->GetTemplate();
+    if (item->GetUInt32Value(ITEM_FIELD_DURATION) != proto->Duration ||
+        item->GetUInt32Value(ITEM_FIELD_MAXDURABILITY) != proto->MaxDurability ||
+        item->GetUInt32Value(ITEM_FIELD_DURABILITY) != proto->MaxDurability)
+        return false;
+    for (uint8 slot = 0; slot < MAX_ENCHANTMENT_SLOT; ++slot)
+        if (item->GetEnchantmentId(EnchantmentSlot(slot)) ||
+            item->GetEnchantmentDuration(EnchantmentSlot(slot)) ||
+            item->GetEnchantmentCharges(EnchantmentSlot(slot)))
+            return false;
+    for (uint8 index = 0; index < MAX_ITEM_PROTO_SPELLS; ++index)
+        if (item->GetSpellCharges(index) != proto->Spells[index].SpellCharges)
+            return false;
+    return true;
+}
+
 bool ParseArg(std::vector<std::string> const& args, std::size_t index, uint32& value)
 {
     return index < args.size() && NativeReagents::Protocol::ParseUInt32(args[index], value);
@@ -365,6 +397,139 @@ uint64 Manager::DepositAll(Player* player, std::string& error, uint64 operationI
     return 0;
 }
 
+bool Manager::Deposit(Player* player, uint32 entry, uint32 amount, std::string& error, uint64 operationId) const
+{
+    ItemTemplate const* proto = entry ? sObjectMgr->GetItemTemplate(entry) : nullptr;
+    if (!IsEnabled() || !player || !entry || !amount)
+    {
+        error = "Invalid individual deposit request.";
+        return false;
+    }
+    if (!proto || !IsEligible(proto))
+    {
+        error = "That item is not eligible for reagent storage.";
+        return false;
+    }
+    OperationGuard guard(Guid(player));
+    if (!guard)
+    {
+        error = "Another reagent operation is still in progress.";
+        return false;
+    }
+    operationId = operationId ? operationId : NewOperationId();
+    OperationStatus prior = GetOperationStatus(Guid(player), operationId, "DEPOSIT_ITEM", "COMPLETED");
+    if (prior == OperationStatus::Present)
+    {
+        if (IndividualDepositMatches(Guid(player), operationId, entry, amount)) return true;
+        error = "The request identifier was already used for another individual deposit.";
+        return false;
+    }
+    if (prior == OperationStatus::Unavailable)
+    {
+        error = "The reagent database is unavailable; nothing was deposited.";
+        return false;
+    }
+    if (player->HasQuestForItem(entry))
+    {
+        error = "That reagent is protected by an active quest.";
+        return false;
+    }
+
+    struct Candidate { uint8 bag; uint8 slot; uint32 count; };
+    std::vector<Candidate> candidates;
+    uint64 available = 0;
+    auto inspect = [&](uint8 bag, uint8 slot, Item* item)
+    {
+        if (item && item->GetEntry() == entry && IsPlainStorageItem(item))
+        {
+            candidates.push_back({bag, slot, item->GetCount()});
+            available += item->GetCount();
+        }
+    };
+    for (uint8 slot = INVENTORY_SLOT_ITEM_START; slot < INVENTORY_SLOT_ITEM_END; ++slot)
+        inspect(INVENTORY_SLOT_BAG_0, slot, player->GetItemByPos(INVENTORY_SLOT_BAG_0, slot));
+    for (uint8 bagSlot = INVENTORY_SLOT_BAG_START; bagSlot < INVENTORY_SLOT_BAG_END; ++bagSlot)
+        if (Bag* bag = player->GetBagByPos(bagSlot))
+            for (uint32 slot = 0; slot < bag->GetBagSize(); ++slot)
+                inspect(bagSlot, uint8(slot), bag->GetItemByPos(slot));
+    if (available < amount)
+    {
+        error = "The requested eligible inventory quantity is not available.";
+        return false;
+    }
+
+    uint64 stored = GetStored(player, entry), finalQuantity = 0;
+    if (!Safety::CheckedAdd(stored, amount, MaxQuantity(), finalQuantity))
+    {
+        error = "A reagent quantity limit would be exceeded; nothing was deposited.";
+        return false;
+    }
+    uint32 typeLimit = MaxTypes();
+    if (!stored && typeLimit && CountTypes(player) >= typeLimit)
+    {
+        error = "The reagent type limit would be exceeded; nothing was deposited.";
+        return false;
+    }
+
+    struct Removal { uint8 bag; uint8 slot; uint32 original; uint32 amount; };
+    std::vector<Removal> removals;
+    uint32 remaining = amount;
+    for (Candidate const& candidate : candidates)
+    {
+        uint32 take = std::min(candidate.count, remaining);
+        if (take) removals.push_back({candidate.bag, candidate.slot, candidate.count, take});
+        remaining -= take;
+        if (!remaining) break;
+    }
+    for (Removal const& removal : removals)
+    {
+        Item* item = player->GetItemByPos(removal.bag, removal.slot);
+        if (!item || item->GetEntry() != entry || item->GetCount() != removal.original ||
+            !IsPlainStorageItem(item) || player->HasQuestForItem(entry))
+        {
+            error = "Inventory changed during deposit; nothing was deposited.";
+            return false;
+        }
+    }
+
+    for (Removal const& removal : removals)
+    {
+        Item* item = player->GetItemByPos(removal.bag, removal.slot);
+        uint32 remove = removal.amount;
+        player->DestroyItemCount(item, remove, true);
+        ASSERT(remove == 0);
+    }
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    transaction->Append(
+        "INSERT INTO character_bank_reagents(guid,item_entry,quantity) VALUES({}, {}, {}) "
+        "ON DUPLICATE KEY UPDATE quantity=VALUES(quantity)", Guid(player), entry, finalQuantity);
+    transaction->Append(
+        "INSERT INTO character_native_reagent_operations"
+        "(guid,operation_id,kind,state,item_entry,amount,result_amount) "
+        "VALUES({}, {}, 'DEPOSIT_ITEM', 'COMPLETED', {}, {}, {})",
+        Guid(player), operationId, entry, amount, amount);
+    player->SaveInventoryAndGoldToDB(transaction);
+    CommitInventoryTransaction(transaction);
+    OperationStatus committed = GetOperationStatus(Guid(player), operationId, "DEPOSIT_ITEM", "COMPLETED");
+    Safety::CommitDecision decision = Safety::ClassifyCommitVerification(
+        committed != OperationStatus::Unavailable, committed == OperationStatus::Present);
+    if (decision == Safety::CommitDecision::Accept)
+        return true;
+    if (decision == Safety::CommitDecision::FailStop)
+        FailStopAmbiguousCommit("individual deposit", Guid(player), operationId);
+
+    ItemPosCountVec destination;
+    bool restored = player->CanStoreNewItem(NULL_BAG, NULL_SLOT, destination, entry, amount) == EQUIP_ERR_OK &&
+        player->StoreNewItem(destination, entry, true);
+    error = "The reagent deposit could not be committed; no persistent items were moved.";
+    if (!restored)
+    {
+        error += " Reconnect to reload the unchanged persistent inventory.";
+        player->GetSession()->KickPlayer("Native Reagents individual deposit recovery");
+    }
+    return false;
+}
+
 bool Manager::Withdraw(Player* player, uint32 entry, uint32 amount, std::string& error, uint64 operationId) const
 {
     if (!IsEnabled() || !player || !entry || !amount)
@@ -597,7 +762,7 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
         }
         return reply("DATA", body.str());
     }
-    bool mutation = request.command == "DEPOSIT" || request.command == "AUTO" ||
+    bool mutation = request.command == "DEPOSIT" || request.command == "DEPOSIT_ITEM" || request.command == "AUTO" ||
         request.command == "WITHDRAW" || request.command == "CRAFT" || request.command == "CANCEL";
     uint32 guid = Guid(player);
     uint64 requestKey = (uint64(guid) << 32) | request.id;
@@ -638,6 +803,17 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
         if (!authorize()) return finish(reply("ERR", "banker-required"));
         std::string error; uint64 amount = DepositAll(player, error, requestKey);
         return finish(error.empty() ? reply("DEPOSITED", std::to_string(amount)) : reply("ERR", error));
+    }
+    if (request.command == "DEPOSIT_ITEM")
+    {
+        uint32 entry = 0, amount = 0;
+        if (!authorize()) return finish(reply("ERR", "banker-required"));
+        if (request.arguments.size() != 2 || !ParseArg(request.arguments, 0, entry) ||
+            !ParseArg(request.arguments, 1, amount) || !entry || !amount)
+            return finish(reply("ERR", "bad-individual-deposit"));
+        std::string error;
+        return finish(Deposit(player, entry, amount, error, requestKey) ?
+            reply("DEPOSITED", std::to_string(entry) + "|" + std::to_string(amount)) : reply("ERR", error));
     }
     if (request.command == "AUTO")
     {

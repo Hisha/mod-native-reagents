@@ -16,6 +16,8 @@ standalone WoW addon and does not require one.
 
 - Character-specific reagent storage in the characters database.
 - Manual **Deposit Reagents** and persistent per-character **Auto Deposit** controls.
+- Public `NativeReagents.Deposit(itemId, quantity)` support for exact full-stack, partial-stack,
+  and multi-stack deposits by conventional 3.3.5a addons.
 - A dedicated paged reagent view with 35 entries per page, item icons, quantities,
   quality borders, tooltips, and stack-aware withdrawal.
 - Deposit eligibility is derived from trade-skill spell reagents, including custom recipes;
@@ -222,6 +224,16 @@ protocol. The server publishes bounded, paged snapshots; the client assembles a 
 generation before replacing its displayed balance. Client requests never establish banker
 authority and are not trusted as proof of items or quantities.
 
+The public FrameXML API also exposes `NativeReagents.Deposit(itemId, quantity)`. It returns
+`sent, requestId`; final success arrives through the `DEPOSITED` callback and failures through
+`ERROR`. The server selects and removes exactly the requested eligible inventory quantity and
+then publishes the normal authoritative snapshot. Callers must not clear a cursor item or alter
+their local balance merely because the request was sent. Build 12340 does not expose a reliable
+split count through `GetCursorInfo()`, so an addon must retain the count supplied to its own split
+callback (or use an explicit quantity dialog). Complete-stack callers can capture the source-slot
+count with `GetContainerItemInfo` before the drag. See
+[`docs/NATIVE_CLIENT_API.md`](docs/NATIVE_CLIENT_API.md) for the full cursor contract.
+
 Profession integration reads the stock trade-skill reagent item IDs and combines the carried
 counts reported by the client API with the latest synchronized storage snapshot. Those totals
 drive recipe-list quantities, selected-recipe counts, and the custom Have Materials mapping.
@@ -248,6 +260,8 @@ temporarily materializes only the shortage, and lets AzerothCore perform its nor
   Blizzard textures. Validate the supported UI scales and cumulative patch in the target
   client environment; the live checklist is in
   [`docs/LIVE_TEST_PLAN.md`](docs/LIVE_TEST_PLAN.md).
+- Cursor visuals, split-stack cursor persistence, and bag-event ordering still require live
+  build-12340 verification; mocked tests prove only request/callback behavior.
 
 ## Development and Testing
 

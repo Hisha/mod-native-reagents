@@ -1,4 +1,5 @@
 local sent, frames, hooks = {}, {}, {}
+local publicEvents = {}
 local Event
 local unpackValues = table.unpack or unpack
 
@@ -282,6 +283,25 @@ Event("PLAYER_LOGIN")
 local _, helloRequest = LastRequest("HELLO")
 Reply(helloRequest, "HELLO", "1|1")
 CompleteLatestSync("101:10,104:5,106:10,200:100,201:10,202:5")
+Event("BANKFRAME_OPENED")
+NativeReagents.RegisterCallback(function(event, ...) publicEvents[#publicEvents + 1] = {event, ...} end, "deposit-test")
+local individualBefore = RequestCount("DEPOSIT_ITEM")
+assert(not NativeReagents.Deposit(nil, 1) and not NativeReagents.Deposit(101, 0) and
+       not NativeReagents.Deposit(101.5, 1) and not NativeReagents.Deposit(101, 1.5) and
+       RequestCount("DEPOSIT_ITEM") == individualBefore, "invalid individual deposit was sent")
+local sentDeposit, publicRequest = NativeReagents.Deposit(101, 7)
+assert(sentDeposit and publicRequest, "valid individual deposit was rejected by the API")
+local _, depositRequest, depositArguments = LastRequest("DEPOSIT_ITEM")
+assert(publicRequest == depositRequest, "individual deposit did not return its request identifier")
+assert(depositArguments == "101|7", "individual deposit arguments were malformed")
+Reply(depositRequest, "DEPOSITED", "101|7")
+local depositEvent
+for _, callbackEvent in ipairs(publicEvents) do
+    if callbackEvent[1] == "DEPOSITED" then depositEvent = callbackEvent end
+end
+assert(depositEvent[1] == "DEPOSITED" and depositEvent[2] == 101 and depositEvent[3] == 7 and
+       depositEvent[4] == depositRequest, "individual deposit completion callback was malformed")
+CompleteLatestSync("101:17,104:5,106:10,200:100,201:10,202:5")
 TradeSkillFrame:Show()
 CompleteLatestSync("101:10,104:5,106:10,200:100,201:10,202:5")
 TradeSkillFrame_Update()

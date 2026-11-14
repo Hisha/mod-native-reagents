@@ -36,6 +36,15 @@ reconnects. Records older than 30 days are pruned. A database outage detected be
 returns an explicit failure. If a definitely failed deposit cannot restore its in-memory items,
 the session is closed so the unchanged persistent inventory is reloaded.
 
+Individual deposits use the same boundary. The request journal records `DEPOSIT_ITEM` together
+with its item entry and quantity, so a replay succeeds only when all arguments match the durable
+operation. All eligible stacks are re-read before any is changed; partial stacks are reduced in
+place and full stacks are removed only until the exact requested quantity is reached. Insufficient
+inventory, quest protection, unsupported instance state, storage limits, or authorization failure
+therefore occurs before mutation. The entry-only storage model cannot preserve random properties,
+enchantments, changed charges/duration/durability, binding and refund flags, wrapped/text/loot
+state, or an item in trade; those physical instances are excluded from individual deposits.
+
 ## Single-writer rule
 
 `mod-native-reagents` must be the only process/module modifying these rows for an online

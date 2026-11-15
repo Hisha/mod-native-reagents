@@ -762,8 +762,9 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
         }
         return reply("DATA", body.str());
     }
-    bool mutation = request.command == "DEPOSIT" || request.command == "DEPOSIT_ITEM" || request.command == "AUTO" ||
-        request.command == "WITHDRAW" || request.command == "CRAFT" || request.command == "CANCEL";
+    bool mutation = request.command == "DEPOSIT" || request.command == "DEPOSIT_ITEM" ||
+        request.command == "QUICK_DEPOSIT" || request.command == "AUTO" || request.command == "WITHDRAW" ||
+        request.command == "CRAFT" || request.command == "CANCEL";
     uint32 guid = Guid(player);
     uint64 requestKey = (uint64(guid) << 32) | request.id;
     auto previous = MutationReplies.find(requestKey);
@@ -811,6 +812,20 @@ std::string Manager::HandleRequest(Player* player, std::string const& payload)
         if (request.arguments.size() != 2 || !ParseArg(request.arguments, 0, entry) ||
             !ParseArg(request.arguments, 1, amount) || !entry || !amount)
             return finish(reply("ERR", "bad-individual-deposit"));
+        std::string error;
+        return finish(Deposit(player, entry, amount, error, requestKey) ?
+            reply("DEPOSITED", std::to_string(entry) + "|" + std::to_string(amount)) : reply("ERR", error));
+    }
+    if (request.command == "QUICK_DEPOSIT")
+    {
+        uint32 entry = 0, amount = 0;
+        if (!authorize()) return finish(reply("ERR", "banker-required"));
+        if (request.arguments.size() != 2 || !ParseArg(request.arguments, 0, entry) ||
+            !ParseArg(request.arguments, 1, amount) || !entry || !amount)
+            return finish(reply("ERR", "bad-quick-deposit"));
+        ItemTemplate const* proto = sObjectMgr->GetItemTemplate(entry);
+        if (!proto || !IsEligible(proto))
+            return finish(reply("NOT_REAGENT", std::to_string(entry) + "|" + std::to_string(amount)));
         std::string error;
         return finish(Deposit(player, entry, amount, error, requestKey) ?
             reply("DEPOSITED", std::to_string(entry) + "|" + std::to_string(amount)) : reply("ERR", error));

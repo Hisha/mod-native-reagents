@@ -70,6 +70,15 @@ deployment or an intentional server revision update.
 - With empty storage, confirm `No reagents stored` and 35 initialized empty slots. With 1, 35,
   36, and 71 distinct entries, verify `Page X of Y`, disabled bounds, Previous/Next, mouse-wheel
   navigation, icons, quality borders, quantities above normal stack size, and tooltips.
+- With the stock inventory open at a banker, right-click a known reagent once on the Bank view
+  and confirm it moves to the ordinary bank. Switch to Reagents and right-click a full reagent
+  stack; confirm the entire clicked count enters Native Reagents and the ordinary bank receives
+  nothing. Right-click a non-reagent and confirm it follows ordinary bank placement after the
+  server response. Repeat after switching tabs several times and with Shift held.
+- Move out of banker range (or otherwise invalidate the banker session) while the Reagents view
+  remains visible, then right-click a reagent. Confirm the request is rejected, the ordinary bank
+  receives nothing, and only one authorization notice appears. Close the bank and confirm normal
+  item use/equip behavior is unchanged.
 - Right-click an entry to withdraw one normal stack; shift-click it to withdraw a chosen amount.
   Confirm successful deposit/withdraw refreshes and full-bag/invalid-quantity failures do not
   corrupt the displayed or persisted balance.
@@ -86,6 +95,9 @@ deployment or an intentional server revision update.
   deploy through Portalkeeper with `protected-framexml`, and verify tooltips/quality borders.
 - Repeat without BankReagentsUI and UnifiedBags335 installed. Test an alternative presenter
   using the documented API, then release ownership and confirm the default view returns.
+- UnifiedNativeBags335 uses an independent item-button `OnClick` handler and therefore requires
+  its documented `NativeReagents.DepositInventoryItem(bag, slot)` integration before repeating
+  the same right-click matrix. Do not infer addon compatibility from the stock-frame test.
 - Open normal bags, a guild bank, mail, vendors, auction house, and profession windows before
   and after bank use; verify this presentation changes only the personal BankFrame.
 

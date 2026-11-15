@@ -14,6 +14,10 @@ the default bank presentation.
 | `GetQuantity(itemId)` | Synchronized stored quantity or `0`. |
 | `DepositAll()` | Requests a banker-validated deposit; returns whether a request was sent. |
 | `Deposit(itemId, quantity)` | Requests an exact banker-validated inventory deposit; returns `sent, requestId`. |
+| `DepositInventoryItem(bag, slot)` | Requests context-aware deposit of the exact current inventory stack; non-reagents resume ordinary banking after the server response. |
+| `HandleInventoryItemRightClick(bag, slot)` | Handles an unmodified right-click only while the stock Reagents view is active. |
+| `GetBankView()` | Returns the stock bank presentation's current `bank` or `reagents` view. |
+| `IsReagentBankViewActive()` | True while the personal bank is open on the stock Reagents view. |
 | `Withdraw(itemId, quantity)` | Requests a banker-validated withdrawal. |
 | `GetAutoDeposit()` | Last synchronized per-character preference. |
 | `SetAutoDeposit(enabled)` | Requests a banker-validated preference change. |
@@ -32,6 +36,23 @@ Failure emits `ERROR(message, "DEPOSIT_ITEM", requestId)` and does not change th
 Callers can use the returned request ID to correlate either event. They must not optimistically
 edit `GetItems()`.
 
+`DepositInventoryItem` accepts only backpack and equipped bag IDs (`0` through `4` on the
+stock client). It snapshots the item ID and entire stack count from the specified slot and
+sends one `QUICK_DEPOSIT` request. The server checks the validated banker session before it
+classifies the item with the same trade-skill reagent set used by normal deposits. Eligible
+items enter the existing `Deposit` transaction path. If the server explicitly reports that
+the item is not a reagent, the client rechecks that the source slot still contains the same
+item and count before calling ordinary `UseContainerItem(bag, slot)`. Any other rejection,
+including an invalid banker session, does not perform a regular-bank transfer. A pending slot
+is suppressed so one click cannot enqueue duplicate deposit operations.
+
+The stock build-12340 `ContainerFrameItemButtonTemplate` sends modified clicks to
+`ContainerFrameItemButton_OnModifiedClick` and unmodified clicks to
+`ContainerFrameItemButton_OnClick`. Native Reagents narrowly wraps the latter and delegates
+every case except an unmodified right-click while its Reagents view is active. It does not
+replace `UseContainerItem`, so unrelated callers and bank-closed inventory behavior remain
+unchanged.
+
 Callback events are `AVAILABLE`, `STATUS_CHANGED`, `SYNC_FAILED`, `BANK_OPENED`,
 `BANK_CLOSED`, `ITEMS_UPDATED`, `AUTO_DEPOSIT_CHANGED`, `PRESENTATION_CHANGED`, and `ERROR`.
 Individual deposits additionally emit `DEPOSITED` as described above.
@@ -43,6 +64,22 @@ An alternative UI such as
 UnifiedNativeBags calls `RegisterPresentation(itsPresenter)` while active and
 `RegisterPresentation(nil)` when releasing ownership. The stock Reagents view remains the
 fallback. Operations expose no database access and responses are always authoritative.
+
+Alternative bag buttons that call `UseContainerItem` directly do not automatically pass
+through the stock container-button handler. After their existing modified-click and split-stack
+branches, they should replace the direct `UseContainerItem(button.bag, button.slot)` call only
+for their own active Reagents view with:
+
+```lua
+if not NativeReagents.DepositInventoryItem(button.bag, button.slot) then
+    UseContainerItem(button.bag, button.slot)
+end
+```
+
+UnifiedNativeBags335 currently has an independent `OnClick` handler with a direct
+`UseContainerItem` call, so it requires precisely that addon-side integration and does not
+inherit the stock behavior automatically. Native Reagents deliberately does not globally wrap
+`UseContainerItem` to force third-party buttons through this policy.
 
 ## Cursor and drag-and-drop callers
 

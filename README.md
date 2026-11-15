@@ -18,6 +18,8 @@ standalone WoW addon and does not require one.
 - Manual **Deposit Reagents** and persistent per-character **Auto Deposit** controls.
 - Public `NativeReagents.Deposit(itemId, quantity)` support for exact full-stack, partial-stack,
   and multi-stack deposits by conventional 3.3.5a addons.
+- Context-aware stock-bag right-click deposits while the Reagents bank view is active, with
+  authoritative non-reagent fallback to ordinary banking.
 - A dedicated paged reagent view with 35 entries per page, item icons, quantities,
   quality borders, tooltips, and stack-aware withdrawal.
 - Deposit eligibility is derived from trade-skill spell reagents, including custom recipes;

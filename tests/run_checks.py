@@ -45,6 +45,8 @@ def main() -> None:
             "IsPlainStorageItem" in manager, "individual deposit server path missing")
     require('request.arguments.size() != 2' in manager and '"bad-individual-deposit"' in manager,
             "individual deposit protocol parsing is not strict")
+    require('request.command == "QUICK_DEPOSIT"' in manager and 'reply("NOT_REAGENT"' in manager,
+            "context-aware inventory deposit path missing")
     for api in ("IsAvailable", "IsReady", "GetStatus", "IsBankOpen", "GetItems", "GetQuantity", "DepositAll", "Deposit", "Withdraw", "GetAutoDeposit", "SetAutoDeposit", "RegisterCallback", "RegisterPresentation"):
         require(("function NR." + api) in lua, "missing Lua API " + api)
     for obsolete in ("VisibleRecipeMaximum", "ApplyVisibleRecipeCounts", "RenderVisibleRecipeCount",
@@ -74,6 +76,10 @@ def main() -> None:
             "Have Materials checkbox is not intercepted")
     require("GetItemCount =" not in lua and "function GetItemCount" not in lua,
             "implementation must not override GetItemCount")
+    require("function NR.DepositInventoryItem" in lua and "function NR.HandleInventoryItemRightClick" in lua,
+            "public inventory quick-deposit API missing")
+    require("local StockContainerFrameItemButton_OnClick = ContainerFrameItemButton_OnClick" in lua,
+            "stock inventory handler integration missing")
     require('button:SetID(index)' in lua and 'TradeSkillFrame_SetSelection(index)' in lua,
             "filtered rows do not retain native recipe indices")
     require(lua.count("local function ApplyList()") == 1,

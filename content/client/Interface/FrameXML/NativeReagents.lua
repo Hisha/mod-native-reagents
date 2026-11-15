@@ -7,6 +7,7 @@ NR.autoDeposit, NR.autoKnown, NR.syncing = false, false, false
 NR.status, NR.protocolVersion = "unavailable", nil
 NR.remoteEnabled = false
 NR.pending, NR.bankAuthorizationWarned, NR.lastError = {}, false, nil
+NR.quickDeposits, NR.quickDepositSlots, NR.bankView = {}, {}, "bank"
 NR.sequence = math.random(100000, 900000)
 NR.syncSequence, NR.activeSync, NR.resyncPending = 0, nil, false
 NR.syncTimeout, NR.syncMaxRetries = 3.0, 2
@@ -23,6 +24,63 @@ local function Send(command, ...)
     NR.pending[NR.sequence] = command
     SendAddonMessage(PREFIX, payload, "WHISPER", UnitName("player"))
     return NR.sequence
+end
+
+local function ItemIDFromLink(link) return link and tonumber(string.match(link, "item:(%d+)")) end
+local function InventorySlotKey(bag, slot) return tostring(bag) .. ":" .. tostring(slot) end
+
+function NR.SetBankView(bankView)
+    if bankView ~= "bank" and bankView ~= "reagents" then return false end
+    NR.bankView = bankView
+    return true
+end
+function NR.GetBankView() return NR.bankView end
+function NR.IsReagentBankViewActive()
+    return NR.bankOpen and NR.bankView == "reagents"
+end
+
+-- Requests the exact stack currently in an ordinary inventory bag. Eligibility
+-- is intentionally decided by the server: the client item API cannot reproduce
+-- the server's trade-skill reagent set, especially for custom recipes.
+function NR.DepositInventoryItem(bag, slot)
+    bag, slot = tonumber(bag), tonumber(slot)
+    local maximumBag = BAG_COUNT or NUM_BAG_SLOTS or 4
+    if not NR.bankOpen or not NR.IsReady() or not bag or not slot or
+        bag ~= math.floor(bag) or slot ~= math.floor(slot) or
+        bag < (BACKPACK_CONTAINER or 0) or bag > maximumBag or slot < 1 then return false end
+    local _, quantity, locked, _, _, _, link = GetContainerItemInfo(bag, slot)
+    link = link or (GetContainerItemLink and GetContainerItemLink(bag, slot))
+    local itemId = ItemIDFromLink(link)
+    quantity = tonumber(quantity)
+    if locked or not itemId or not quantity or quantity < 1 then return false end
+    local key = InventorySlotKey(bag, slot)
+    if NR.quickDepositSlots[key] then return true end
+    local request = Send("QUICK_DEPOSIT", itemId, math.floor(quantity))
+    NR.quickDeposits[request] = { bag=bag, slot=slot, itemId=itemId, quantity=math.floor(quantity), key=key }
+    NR.quickDepositSlots[key] = request
+    return true, request
+end
+
+function NR.HandleInventoryItemRightClick(bag, slot)
+    if not NR.IsReagentBankViewActive() then return false end
+    return NR.DepositInventoryItem(bag, slot)
+end
+
+-- Stock build-12340 container buttons call this Lua handler after the XML has
+-- already routed modified clicks elsewhere. There is no pre-hook facility, so
+-- retain Blizzard's handler and intercept only the one unmodified right-click
+-- case that must run before UseContainerItem.
+local StockContainerFrameItemButton_OnClick = ContainerFrameItemButton_OnClick
+if StockContainerFrameItemButton_OnClick then
+    ContainerFrameItemButton_OnClick = function(self, mouseButton)
+        local parent = self and self.GetParent and self:GetParent()
+        if mouseButton == "RightButton" and not IsModifiedClick() and parent and
+            NR.HandleInventoryItemRightClick(parent:GetID(), self:GetID()) then
+            if StackSplitFrame then StackSplitFrame:Hide() end
+            return
+        end
+        return StockContainerFrameItemButton_OnClick(self, mouseButton)
+    end
 end
 
 local function Fire(event, ...)
@@ -104,7 +162,6 @@ local function CompleteSync(sync)
     return true
 end
 
-local function ItemIDFromLink(link) return link and tonumber(string.match(link, "item:(%d+)")) end
 local function SpellIDForRecipe(index)
     local link = GetTradeSkillRecipeLink(index)
     return link and (tonumber(string.match(link, "enchant:(%d+)")) or tonumber(string.match(link, "spell:(%d+)")))
@@ -448,9 +505,14 @@ events:SetScript("OnEvent", function(self, event, ...)
     if event == "PLAYER_LOGIN" then NR.helloStarted = GetTime(); Send("HELLO"); StartSync(0); return end
     if event == "BANKFRAME_OPENED" then
         NR.bankOpen, NR.bankAuthorizationWarned, NR.lastError = true, false, nil
+        NR.bankView = "bank"
         Send("BANKOPEN"); Fire("BANK_OPENED"); return
     end
-    if event == "BANKFRAME_CLOSED" then NR.bankOpen = false; Send("BANKCLOSE"); Fire("BANK_CLOSED"); return end
+    if event == "BANKFRAME_CLOSED" then
+        NR.bankOpen, NR.bankView = false, "bank"
+        NR.quickDeposits, NR.quickDepositSlots = {}, {}
+        Send("BANKCLOSE"); Fire("BANK_CLOSED"); return
+    end
     if event == "ADDON_LOADED" then if (...) == "Blizzard_TradeSkillUI" then InstallTradeSkill(); NR.RequestSync() end return end
     if event == "TRADE_SKILL_UPDATE" or event == "TRADE_SKILL_FILTER_UPDATE" then
         InvalidateTradeSkillFilter()
@@ -472,6 +534,11 @@ events:SetScript("OnEvent", function(self, event, ...)
     request = tonumber(request)
     local command = NR.pending[request]
     NR.pending[request] = nil
+    local quickDeposit = NR.quickDeposits[request]
+    if quickDeposit then
+        NR.quickDeposits[request] = nil
+        NR.quickDepositSlots[quickDeposit.key] = nil
+    end
     NR.available = true; NR.protocolVersion = tonumber(version)
     if kind == "HELLO" then local remote = string.match(body, "^([01])|"); NR.remoteEnabled = remote == "1"; InstallTradeSkill(); Fire("AVAILABLE", true); return end
     if kind == "DATA" then
@@ -499,11 +566,21 @@ events:SetScript("OnEvent", function(self, event, ...)
     if kind == "AUTO" then NR.lastError = nil; NR.autoDeposit, NR.autoKnown = body == "1", true; Fire("AUTO_DEPOSIT_CHANGED", NR.autoDeposit); return end
     if kind == "DEPOSITED" or kind == "WITHDRAWN" then
         NR.lastError = nil
-        if kind == "DEPOSITED" and command == "DEPOSIT_ITEM" then
+        if kind == "DEPOSITED" and (command == "DEPOSIT_ITEM" or command == "QUICK_DEPOSIT") then
             local itemId, quantity = string.match(body, "^(%d+)|(%d+)$")
             if itemId then Fire("DEPOSITED", tonumber(itemId), tonumber(quantity), request) end
         end
         NR.RequestSync(); return
+    end
+    if kind == "NOT_REAGENT" and command == "QUICK_DEPOSIT" and quickDeposit then
+        local _, quantity, locked, _, _, _, link = GetContainerItemInfo(quickDeposit.bag, quickDeposit.slot)
+        link = link or (GetContainerItemLink and GetContainerItemLink(quickDeposit.bag, quickDeposit.slot))
+        if NR.bankOpen and not locked and ItemIDFromLink(link) == quickDeposit.itemId and
+            tonumber(quantity) == quickDeposit.quantity then
+            UseContainerItem(quickDeposit.bag, quickDeposit.slot)
+            if StackSplitFrame then StackSplitFrame:Hide() end
+        end
+        return
     end
     if kind == "ERR" then
         NR.lastError = body

@@ -11,6 +11,8 @@ int main()
     assert(withdrawal && withdrawal->arguments.size() == 2 && withdrawal->arguments[0] == "36901");
     auto deposit = Parse("2|19|DEPOSIT_ITEM|36901|7");
     assert(deposit && deposit->arguments.size() == 2 && deposit->arguments[0] == "36901" && deposit->arguments[1] == "7");
+    auto quickDeposit = Parse("2|20|QUICK_DEPOSIT|36901|20");
+    assert(quickDeposit && quickDeposit->arguments.size() == 2 && quickDeposit->arguments[1] == "20");
     assert(!Parse("1|17|HELLO"));
     assert(!Parse("2|0|HELLO"));
     assert(!Parse("2|x|HELLO"));

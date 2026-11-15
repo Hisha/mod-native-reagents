@@ -1,4 +1,19 @@
-# Test results — 2026-11-12
+# Test results
+
+## Incremental pass — 2026-11-14
+
+- `python3 tests/run_checks.py`
+  - Protocol, safety/conservation model, synchronization, Lua syntax, stock bank UI, profession
+    integration, and deterministic EPF checks passed.
+  - The mocked build-12340 client matrix additionally passed context-aware inventory right-click
+    coverage for Bank/Reagents view selection, full-stack quantity, non-reagent fallback, closed
+    and invalid banker sessions, repeated view switching, pending-click deduplication, modifiers,
+    and compatibility with the existing individual-deposit callback contract.
+  - EPF SHA-256: `bcb91d485ebf37dbd9128c02654b0e493369a5744f5b7a6f7940b351fbc49377`.
+- No patched 3.3.5a client was connected during this incremental pass. Stock mouse behavior,
+  asynchronous non-reagent fallback, and addon integration still require the live-client matrix.
+
+## Full baseline pass — 2026-11-12
 
 ## Passed
 

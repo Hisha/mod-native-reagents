@@ -20,6 +20,7 @@ local function Widget(shown)
     function widget:SetWidth(value) self.setWidth = value; self.width = value end
     function widget:SetID(value) self.id = value end
     function widget:GetID() return self.id end
+    function widget:GetParent() return self.parent end
     function widget:SetChecked(value) self.checked = value and true or false end
     function widget:GetChecked() return self.checked and true or false end
     function widget:SetNumber(value) self.number = value end
@@ -63,6 +64,27 @@ function UnitName() return "Tester" end
 function GetTime() return 100 end
 function IsTradeSkillLinked() return false end
 function DoTradeSkill(index, count) _G.lastStockCraft = { index, count } end
+
+BACKPACK_CONTAINER, BAG_COUNT = 0, 4
+local containerItems, usedContainerItems = {}, {}
+local modifiedClick = false
+function GetContainerItemInfo(bag, slot)
+    local item = containerItems[bag .. ":" .. slot]
+    if not item then return nil end
+    return "texture", item.count, item.locked, 1, false, false,
+        "|Hitem:" .. item.id .. ":0:0:0|h[item]|h"
+end
+function GetContainerItemLink(bag, slot)
+    local item = containerItems[bag .. ":" .. slot]
+    return item and ("|Hitem:" .. item.id .. ":0:0:0|h[item]|h") or nil
+end
+function UseContainerItem(bag, slot) usedContainerItems[#usedContainerItems + 1] = {bag, slot} end
+function IsModifiedClick() return modifiedClick end
+StackSplitFrame = { Hide=function(self) self.hidden = true end }
+local stockContainerClicks = {}
+function ContainerFrameItemButton_OnClick(button, mouseButton)
+    stockContainerClicks[#stockContainerClicks + 1] = {button, mouseButton}
+end
 
 TRADE_SKILLS_DISPLAYED, TRADE_SKILL_TEXT_WIDTH, TRADE_SKILL_HEIGHT = 5, 275, 16
 MAX_TRADE_SKILL_REAGENTS = 8
@@ -302,6 +324,73 @@ end
 assert(depositEvent[1] == "DEPOSITED" and depositEvent[2] == 101 and depositEvent[3] == 7 and
        depositEvent[4] == depositRequest, "individual deposit completion callback was malformed")
 CompleteLatestSync("101:17,104:5,106:10,200:100,201:10,202:5")
+
+local bagParent = Widget(); bagParent:SetID(0)
+local bagButton = Widget(); bagButton.parent = bagParent; bagButton:SetID(3)
+containerItems["0:3"] = {id=101, count=17}
+
+NativeReagents.SetBankView("bank")
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+assert(#stockContainerClicks == 1 and RequestCount("QUICK_DEPOSIT") == 0,
+    "Bank view did not preserve Blizzard's right-click handler")
+
+NativeReagents.SetBankView("reagents")
+local quickBefore = RequestCount("QUICK_DEPOSIT")
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+local _, quickRequest, quickArguments = LastRequest("QUICK_DEPOSIT")
+assert(RequestCount("QUICK_DEPOSIT") == quickBefore + 1 and quickArguments == "101|17" and
+       #stockContainerClicks == 1 and #usedContainerItems == 0,
+    "Reagent view did not request one exact full-stack deposit before ordinary banking")
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+assert(RequestCount("QUICK_DEPOSIT") == quickBefore + 1,
+    "a pending inventory slot produced a duplicate quick-deposit request")
+Reply(quickRequest, "DEPOSITED", "101|17")
+local quickEvent
+for _, callbackEvent in ipairs(publicEvents) do
+    if callbackEvent[1] == "DEPOSITED" and callbackEvent[4] == quickRequest then quickEvent = callbackEvent end
+end
+assert(quickEvent[1] == "DEPOSITED" and quickEvent[2] == 101 and quickEvent[3] == 17,
+    "quick deposit did not preserve the public deposit completion event")
+CompleteLatestSync("101:34,104:5,106:10,200:100,201:10,202:5")
+
+containerItems["0:3"] = {id=999, count=4}
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+local _, ordinaryRequest, ordinaryArguments = LastRequest("QUICK_DEPOSIT")
+assert(ordinaryArguments == "999|4" and #usedContainerItems == 0,
+    "non-reagent was moved before the authoritative eligibility response")
+Reply(ordinaryRequest, "NOT_REAGENT", "999|4")
+assert(#usedContainerItems == 1 and usedContainerItems[1][1] == 0 and usedContainerItems[1][2] == 3,
+    "non-reagent did not resume ordinary UseContainerItem behavior")
+
+containerItems["0:3"] = {id=101, count=6}
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+local _, invalidSessionRequest = LastRequest("QUICK_DEPOSIT")
+local ordinaryUses = #usedContainerItems
+Reply(invalidSessionRequest, "ERR", "banker-required")
+assert(#usedContainerItems == ordinaryUses,
+    "invalid banker session incorrectly performed an ordinary bank transfer")
+
+modifiedClick = true
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+modifiedClick = false
+assert(#stockContainerClicks == 2 and RequestCount("QUICK_DEPOSIT") == quickBefore + 3,
+    "modified right-click did not preserve Blizzard's modifier path")
+
+NativeReagents.SetBankView("bank")
+NativeReagents.SetBankView("reagents")
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+local _, switchedRequest = LastRequest("QUICK_DEPOSIT")
+assert(switchedRequest ~= invalidSessionRequest,
+    "switching back to Reagents did not reactivate quick deposit")
+Reply(switchedRequest, "DEPOSITED", "101|6")
+CompleteLatestSync("101:40,104:5,106:10,200:100,201:10,202:5")
+
+Event("BANKFRAME_CLOSED")
+ContainerFrameItemButton_OnClick(bagButton, "RightButton")
+assert(#stockContainerClicks == 3,
+    "bank-closed right-click did not preserve Blizzard's handler")
+Event("BANKFRAME_OPENED")
+
 TradeSkillFrame:Show()
 CompleteLatestSync("101:10,104:5,106:10,200:100,201:10,202:5")
 TradeSkillFrame_Update()

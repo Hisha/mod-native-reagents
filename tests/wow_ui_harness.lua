@@ -147,6 +147,8 @@ function NativeReagents.DepositAll() return true end
 function NativeReagents.Withdraw() return true end
 function NativeReagents.RequestSync() NativeReagents.syncRequests = (NativeReagents.syncRequests or 0) + 1 end
 function NativeReagents.GetPresentation() return nil end
+function NativeReagents.SetBankView(view) NativeReagents.bankView = view; return true end
+function NativeReagents.GetBankView() return NativeReagents.bankView end
 function NativeReagents.RegisterCallback(callback) table.insert(NativeReagents.callbacks, callback) end
 local function Fire(event) for _, callback in ipairs(NativeReagents.callbacks) do callback(event) end end
 

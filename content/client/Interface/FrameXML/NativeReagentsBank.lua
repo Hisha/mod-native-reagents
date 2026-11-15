@@ -257,6 +257,7 @@ StaticPopupDialogs["NATIVE_REAGENTS_WITHDRAW"] = {
 
 local function ShowReagents()
     if not view or (NR.GetPresentation() and NR.GetPresentation() ~= view) then return end
+    NR.SetBankView("reagents")
     HideStockForPage()
     view:Show()
     page = 0
@@ -268,6 +269,7 @@ end
 
 local function ShowBank()
     if not view then return end
+    NR.SetBankView("bank")
     view:Hide()
     RestoreStock()
     SetTab(1)
